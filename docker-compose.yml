@@ -1,0 +1,315 @@
+services:
+  api:
+    image: auralith:latest
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+
+    container_name: ${API_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    working_dir: /app
+
+    ports:
+      - "${API_PORT}:8000"
+
+    volumes:
+      - .:/app
+
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload"
+      ]
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+      rabbitmq:
+        condition: service_started
+
+      ollama:
+        condition: service_started
+
+      yue:
+        condition: service_started
+
+      minio:
+        condition: service_healthy
+
+      minio-init:
+        condition: service_completed_successfully
+      
+      qdrant:
+       condition: service_started
+
+    stdin_open: true
+    tty: true
+
+    networks:
+      - backend-network
+
+  celery:
+    image: auralith:latest
+
+    container_name: ${CELERY_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    working_dir: /app
+
+    volumes:
+      - .:/app
+
+    command:
+      [
+        "celery",
+        "-A",
+        "app.workers.celery_app.celery",
+        "worker",
+        "--loglevel=info"
+      ]
+
+    depends_on:
+      rabbitmq:
+        condition: service_started
+
+      redis:
+        condition: service_healthy
+
+      ollama:
+        condition: service_started
+      
+      yue:
+        condition: service_started
+      minio:
+        condition: service_healthy
+
+      minio-init:
+        condition: service_completed_successfully
+
+      qdrant:
+        condition: service_started
+
+    stdin_open: true
+    tty: true
+
+    networks:
+      - backend-network
+
+  rabbitmq:
+    image: rabbitmq:3-management
+
+    container_name: ${RABBITMQ_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+
+    ports:
+      - "${RABBITMQ_PORT}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT}:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - backend-network
+
+  redis:
+    image: redis:7-alpine
+
+    container_name: ${REDIS_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+    command: redis-server --appendonly yes
+
+    ports:
+      - "${REDIS_PORT}:6379"
+
+    volumes:
+      - redis-data:/data
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - backend-network
+
+  yue:
+    build:
+      context: .
+      dockerfile: docker/yue.Dockerfile
+
+    container_name: ${YUE_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    working_dir: /workspace
+
+    command: tail -f /dev/null
+
+    ports:
+      - "${YUE_PORT}:8001"
+
+    volumes:
+      - ./services/yue:/workspace
+      - yue-models:/workspace/models
+      - yue-cache:/root/.cache/huggingface
+
+    # NVIDIA GPU
+    runtime: nvidia
+
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+
+    stdin_open: true
+    tty: true
+
+    networks:
+      - backend-network
+
+  ollama:
+    image: ollama/ollama:latest
+
+    container_name: ${OLLAMA_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+    ports:
+      - "${OLLAMA_PORT}:11434"
+
+    volumes:
+      - ollama-data:/root/.ollama
+
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+    networks:
+      - backend-network
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.4
+
+    container_name: ${QDRANT_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+    ports:
+      - "${QDRANT_PORT}:6333"
+
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+
+    networks:
+      - backend-network
+
+  minio:
+    image: minio/minio:latest
+
+    container_name: ${MINIO_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+    command: server /data --console-address ":9001"
+
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+
+    ports:
+      - "${MINIO_API_PORT}:9000"
+      - "${MINIO_CONSOLE_PORT}:9001"
+
+    volumes:
+      - minio-data:/data
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:9000/minio/health/live"
+        ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+    networks:
+      - backend-network
+
+  minio-init:
+    image: minio/mc:latest
+
+    container_name: auralith-minio-init
+
+    depends_on:
+      minio:
+        condition: service_healthy
+      
+
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      mc mb --ignore-existing local/${MINIO_BUCKET};
+      mc anonymous set none local/${MINIO_BUCKET};
+      echo 'MinIO bucket initialized.';
+      exit 0;
+      "
+
+    restart: "no"
+
+    networks:
+      - backend-network
+
+volumes:
+  redis-data:
+    name: auralith_redis_data
+
+  ollama-data:
+    name: auralith_ollama_data
+
+  minio-data:
+    name: auralith_minio_data
+  
+  yue-models:
+    name: auralith_yue_models
+
+  yue-cache:
+    name: auralith_yue_cache
+  qdrant-data:
+    name: auralith_qdrant_data
+
+networks:
+  backend-network:
+    driver: bridge
