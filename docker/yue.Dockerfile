@@ -5,19 +5,20 @@ ENV PIP_NO_CACHE_DIR=1
 
 WORKDIR /workspace
 
-RUN apt-get update && apt-get install -y \
-    git \
-    ffmpeg \
-    libsndfile1 \
-    curl \
- && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y \
+        git \
+        ffmpeg \
+        libsndfile1 \
+        curl && \
+    rm -rf /var/lib/apt/lists/*
 
-COPY services/yue/requirements.txt .
+COPY yue/requirements.txt .
 
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install -r requirements.txt
 
-COPY services/yue/ .
+COPY yue/ .
 
 EXPOSE 8001
 
