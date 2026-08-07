@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package subscription;
+
+service SubscriptionService {
+  rpc GetSubscription(GetSubscriptionRequest)
+      returns (SubscriptionResponse);
+}
+
+message GetSubscriptionRequest {
+  string user_id = 1;
+}
+
+message SubscriptionResponse {
+  bool active = 1;
+  int32 remaining_tokens = 2;
+}

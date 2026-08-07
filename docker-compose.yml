@@ -20,6 +20,7 @@ services:
 
     volumes:
       - .:/app
+      - ./contracts:/app/contracts
 
     command:
       - uvicorn
@@ -264,6 +265,104 @@ services:
     networks:
       - backend-network
 
+  deepfilternet:
+    build:
+      context: .
+      dockerfile: docker/deepf.Dockerfile
+
+    container_name: auralith-deepfilternet
+
+    restart: unless-stopped
+
+    ports:
+      - "8001:8001"
+
+    volumes:
+      - ./services/deepfilternet/output:/app/output
+
+    networks:
+      - backend-network
+
+
+
+  matchering:
+      build:
+        context: .
+        dockerfile: docker/matchering.Dockerfile
+
+      image: auralith-matchering:latest
+
+      container_name: auralith-matchering
+
+      restart: unless-stopped
+
+      ports:
+        - "8003:8003"
+
+      volumes:
+        - ./services/matchering:/app
+        - ./storage/matchering/input:/app/input
+        - ./storage/matchering/reference:/app/reference
+        - ./storage/matchering/output:/app/output
+        - ./storage/matchering/temp:/app/temp
+
+      healthcheck:
+        test:
+          [
+            "CMD",
+            "curl",
+            "-f",
+            "http://localhost:8003/health"
+          ]
+        interval: 30s
+        timeout: 10s
+        retries: 3
+        start_period: 20s
+
+      stdin_open: true
+      tty: true
+
+      networks:
+        - backend-network
+
+  
+  subscription:
+    container_name: auralith-subscription
+
+    build:
+      context: .
+      dockerfile: docker/subscription.Dockerfile
+
+    image: auralith-subscription:latest
+
+    restart: unless-stopped
+
+    env_file:
+      - ./subscription/.env
+
+    environment:
+      PYTHONPATH: "/app/subscription/generated:/app/subscription"
+
+    working_dir: /app/subscription
+
+    ports:
+      - "8002:8002"
+      - "50052:50052"
+  
+    volumes:
+      - .:/app
+      - ./contracts:/app/contracts
+    command:
+      - uvicorn
+      - main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8002"
+      - --reload
+    networks:
+      - backend-network
+
   minio:
     image: minio/minio:latest
 
@@ -343,6 +442,18 @@ volumes:
   #   name: auralith_yue_cache
   qdrant-data:
     name: auralith_qdrant_data
+
+  matchering-input:
+    name: auralith_matchering_input
+
+  matchering-reference:
+    name: auralith_matchering_reference
+
+  matchering-output:
+    name: auralith_matchering_output
+
+  matchering-temp:
+    name: auralith_matchering_temp
 
 networks:
   backend-network:

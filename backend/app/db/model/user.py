@@ -117,3 +117,22 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+
+
+    subscriptions = relationship(
+    "UserSubscription",
+    back_populates="user",
+    cascade="all, delete-orphan",
+    )
+
+    token_wallet = relationship(
+        "TokenWallet",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+    token_transactions = relationship(
+        "TokenTransaction",
+        cascade="all, delete-orphan",
+    )

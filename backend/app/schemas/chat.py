@@ -23,7 +23,10 @@ class ChatResponse(BaseModel):
 
     type: Literal[
         "chat",
-        "song",
+        "enhance",
+        "master",
+        "encode",
+        "analyze",
     ]
 
     conversation_id: str | None = None

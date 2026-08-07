@@ -4,7 +4,7 @@ from ollama import Client
 from pydantic import ValidationError
 
 from app.core.config import settings
-from app.schemas.song import SongSpec
+from app.schemas.audio import AudioGenerationRequest
 
 logger = logging.getLogger(__name__)
 
@@ -12,82 +12,61 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = """
 You are Auralith.
 
-You are an AI music composer.
+You are an AI assistant for audio processing.
 
-Your ONLY job is to generate JSON.
+Your ONLY task is to generate valid JSON.
 
 Do NOT explain anything.
-
 Do NOT use markdown.
+Do NOT wrap the JSON inside triple backticks.
 
-Do NOT wrap the JSON inside ```.
+Follow the provided JSON schema exactly.
 
-Follow the provided JSON schema EXACTLY.
+The JSON must describe the requested audio processing task.
+
+Supported operations:
+
+- enhance
+- master
+- encode
+- analyze
 
 Rules:
 
-- title must be a string.
-- genre must be a string.
-- mood must be a string.
-- tempo must be an integer.
-- key must be a string.
-- time_signature must be a string.
+- operation must be one of the supported operations.
+- output_format must be a valid audio format when applicable (wav, mp3, flac, aac, ogg).
+- Preserve the user's intent.
+- Do not invent information that was not provided.
+- If an output format is not requested, return null.
 
-- sections MUST exist.
-
-Each section MUST contain:
-
-{
-    "name":"Verse 1",
-    "lyrics":[
-        "line one",
-        "line two"
-    ],
-    "chords":[
-        "C",
-        "G",
-        "Am",
-        "F"
-    ]
-}
-
-- instruments must be a flat array of strings.
-
-GOOD:
-
-"instruments":[
-    "Piano",
-    "Drums",
-    "Bass"
-]
-
-BAD:
-
-"instruments":[
-    ["Piano","Bass"],
-    ["Drums"]
-]
-
-Never return nested arrays.
-
-Return JSON only.
+Return ONLY valid JSON.
 """
 
-
 class OllamaService:
+    """
+    Generates structured audio generation requests
+    using Ollama.
+    """
+
     def __init__(self):
         self.client = Client(
             host=settings.OLLAMA_BASE_URL,
         )
 
-    async def chat(self, prompt: str) -> SongSpec:
+    async def chat(
+        self,
+        prompt: str,
+    ) -> AudioGenerationRequest:
+
         last_error = None
 
         for attempt in range(3):
+
             try:
+
                 response = self.client.chat(
                     model=settings.OLLAMA_MODEL,
-                    format=SongSpec.model_json_schema(),
+                    format=AudioGenerationRequest.model_json_schema(),
                     messages=[
                         {
                             "role": "system",
@@ -107,25 +86,34 @@ class OllamaService:
                 logger.info(content)
                 logger.info("=" * 80)
 
-                return SongSpec.model_validate_json(content)
+                return AudioGenerationRequest.model_validate_json(
+                    content
+                )
 
-            except ValidationError as e:
-                last_error = e
+            except ValidationError as exc:
+
+                last_error = exc
 
                 logger.warning(
-                    "Schema validation failed. Retrying (%s/3)...",
+                    "Schema validation failed (%s/3). Retrying...",
                     attempt + 1,
                 )
 
-            except Exception as e:
-                logger.exception("Ollama request failed.")
-                raise RuntimeError(str(e))
+            except Exception as exc:
+
+                logger.exception(
+                    "Ollama request failed."
+                )
+
+                raise RuntimeError(
+                    f"Failed to communicate with Ollama: {exc}"
+                ) from exc
 
         raise RuntimeError(
             f"""
-Ollama failed to generate a valid SongSpec after 3 attempts.
+Failed to generate a valid AudioGenerationRequest after 3 attempts.
 
-Validation Error:
+Validation error:
 
 {last_error}
 """

@@ -7,78 +7,113 @@ from app.core.logger import logger
 SYSTEM_PROMPT = """
 You are an intent classifier for Auralith.
 
-Classify the user's request into exactly ONE of these labels:
+Auralith is an AI-powered audio processing platform.
 
-song
-chat
-
-Return ONLY the label.
-
-Examples:
-
-User:
-Write me a sad piano ballad.
-
-song
-
-User:
-Generate an EDM track with female vocals.
-
-song
-
-User:
-Compose a rock song about freedom.
-
-song
-
-User:
-What instruments are used in jazz?
+Classify the user's request into exactly ONE of the following labels:
 
 chat
+enhance
+master
+encode
+analyze
 
-User:
-Explain chord progression.
-
-chat
-
-User:
-What is the difference between major and minor scales?
+Definitions:
 
 chat
+- General conversation
+- Questions about Auralith
+- Audio engineering questions
+- Technical support
+- Explanations
 
-User:
-Hello
+enhance
+- Remove background noise
+- Enhance speech clarity
+- Improve vocal quality
+- Audio restoration
+- Speech enhancement
 
-chat
+master
+- Master a song
+- Improve music loudness
+- Audio mastering
+- Loudness normalization
+- Final mix processing
 
-User:
-How are you?
+encode
+- Convert audio formats
+- Compress audio
+- Change bitrate
+- Change sample rate
+- Transcode audio
 
-chat
+analyze
+- Detect BPM
+- Detect musical key
+- Analyze loudness
+- Analyze audio quality
+- Extract audio metadata
 
 Rules:
 
-- If the user wants music, lyrics, a song, melody, chords, composition, or audio generation -> song
-- Otherwise -> chat
+- Return exactly ONE label.
+- Do not explain your answer.
+- Do not include punctuation.
+- If uncertain, return "chat".
 
-Return only:
+Examples:
 
-song
+User: Remove background noise from this recording.
+enhance
 
-or
+User: Improve my voice recording.
+enhance
 
+User: Master this song.
+master
+
+User: Normalize loudness to -14 LUFS.
+master
+
+User: Convert WAV to MP3.
+encode
+
+User: Convert this audio to FLAC.
+encode
+
+User: What's the BPM of this song?
+analyze
+
+User: Analyze this audio file.
+analyze
+
+User: What is LUFS?
+chat
+
+User: Hello
+chat
+
+User: What can Auralith do?
 chat
 """
 
 
+VALID_INTENTS = {
+    "chat",
+    "enhance",
+    "master",
+    "encode",
+    "analyze",
+}
+
+
 class IntentClassifier:
     """
-    Determines whether a request is for
-    song generation or normal conversation.
+    Determines the user's intent for routing
+    requests within Auralith.
     """
 
     def __init__(self):
-
         self.client = AsyncClient(
             host=settings.OLLAMA_BASE_URL,
         )
@@ -121,14 +156,13 @@ class IntentClassifier:
                 intent,
             )
 
-            if intent not in {
-                "song",
-                "chat",
-            }:
+            if intent not in VALID_INTENTS:
+
                 logger.warning(
                     "Unknown intent '%s'. Falling back to chat.",
                     intent,
                 )
+
                 return "chat"
 
             return intent

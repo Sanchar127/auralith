@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+deepfilternet
+soundfile
+numpy<2
+torch
+python-multipart

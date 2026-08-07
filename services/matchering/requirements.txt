@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+python-multipart
+
+numpy
+scipy
+
+librosa
+soundfile
+
+pyloudnorm
+
+pedalboard
+
+ffmpeg-python

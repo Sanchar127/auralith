@@ -8,6 +8,10 @@ from app.core.config import settings
 from app.core.logger import logger
 from app.services.rag.vector_store import vector_store
 
+from threading import Thread
+
+from app.grpc.auth_server import serve
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -39,3 +43,10 @@ app.include_router(
     api_router,
     prefix="/api/v1",
 )
+@app.on_event("startup")
+async def startup():
+
+    Thread(
+        target=serve,
+        daemon=True,
+    ).start()

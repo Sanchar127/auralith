@@ -1,114 +1,238 @@
+from fastapi import (
+    UploadFile,
+    HTTPException,
+)
+
 from celery.result import AsyncResult
 
-from app.core.logger import logger
-from app.schemas.chat import ChatResponse
-from app.tasks.song import generate_song
 
-from app.services.chat.intent import intent_classifier
-from app.services.rag.pipeline import rag_pipeline
+from app.core.logger import logger
+
+
+from app.grpc.subscription_client import (
+    SubscriptionClient,
+)
+
+
+from app.schemas.chat import (
+    ChatResponse,
+)
+
+
+from app.services.rag.pipeline import (
+    rag_pipeline,
+)
+
+
+from app.services.token.token_counter import (
+    token_counter,
+)
+
+
+
 
 
 class ChatService:
-    """
-    Main orchestration service.
 
-    Responsible for routing a request to either:
 
-    - Song Generation
-    - RAG Conversation
-    """
+    def __init__(self):
+
+        self.subscription_client = (
+            SubscriptionClient()
+        )
+
+
+
+
 
     async def chat(
+
         self,
-        conversation_id: str,
-        message: str,
-    ) -> ChatResponse:
+
+        user_id:str,
+
+        conversation_id:str,
+
+        message:str | None,
+
+        file:UploadFile | None = None,
+
+        token_context:dict | None = None,
+
+    ):
+
+
 
         logger.info(
-            "Received chat request."
+            "Processing chat user=%s",
+            user_id,
         )
 
-        # ---------------------------------------
-        # Detect user intent
-        # ---------------------------------------
 
-        intent = await intent_classifier.classify(
-            message
+
+        #
+        # 1. Count input tokens
+        #
+
+        input_tokens = token_counter.count(
+            message or ""
         )
 
-        logger.info(
-            "Detected intent=%s",
-            intent,
-        )
 
-        # ---------------------------------------
-        # SONG GENERATION
-        # ---------------------------------------
 
-        if intent == "song":
+        #
+        # 2. Run AI
+        #
 
-            task = generate_song.delay(
-                message
+        try:
+
+            response = await rag_pipeline.run(
+
+                conversation_id=
+
+                    conversation_id,
+
+
+                message=
+
+                    message or "",
+
             )
 
-            logger.info(
-                "Song generation queued. task_id=%s",
-                task.id,
+
+        except Exception as exc:
+
+            logger.exception(
+                "AI generation failed"
             )
 
-            return ChatResponse(
-                success=True,
-                type="song",
-                conversation_id=conversation_id,
-                task_id=task.id,
-                status="queued",
+            raise HTTPException(
+                500,
+                "AI generation failed",
+            ) from exc
+
+
+
+
+
+        #
+        # 3. Count output tokens
+        #
+
+        output_tokens = token_counter.count(
+            response
+        )
+
+
+
+        total_tokens = (
+
+            input_tokens
+
+            +
+
+            output_tokens
+
+        )
+
+
+
+
+
+        #
+        # 4. Consume tokens
+        #
+
+        try:
+
+
+            await self.subscription_client.consume_tokens(
+
+                user_id=user_id,
+
+
+                input_tokens=input_tokens,
+
+
+                output_tokens=output_tokens,
+
+
+                total_tokens=total_tokens,
+
+
+                model="llama3",
+
+
             )
 
-        # ---------------------------------------
-        # RAG CHAT
-        # ---------------------------------------
 
-        logger.info(
-            "Running RAG pipeline..."
-        )
 
-        response = await rag_pipeline.run(
-            conversation_id=conversation_id,
-            message=message,
-        )
+        except Exception as exc:
 
-        logger.info(
-            "RAG response generated."
-        )
+
+            logger.exception(
+                "Token deduction failed"
+            )
+
+
+            raise HTTPException(
+
+                status_code=503,
+
+                detail="Token service unavailable",
+
+            ) from exc
+
+
+
+
 
         return ChatResponse(
+
             success=True,
+
             type="chat",
+
             conversation_id=conversation_id,
+
             message=response,
+
         )
+
+
+
+
+
+
 
     async def status(
         self,
-        task_id: str,
+        task_id:str,
     ):
 
-        logger.info(
-            "Checking task status. task_id=%s",
-            task_id,
+
+        task = AsyncResult(
+            task_id
         )
 
-        task = AsyncResult(task_id)
 
         return {
+
             "task_id": task.id,
+
+
             "status": task.status,
-            "result": (
+
+
+            "result":
                 task.result
                 if task.ready()
-                else None
-            ),
+                else None,
+
         }
+
+
+
 
 
 chat_service = ChatService()

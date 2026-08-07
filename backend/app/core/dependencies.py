@@ -101,3 +101,4 @@ async def get_auth_service(
     FastAPI dependency that provides an AuthService instance.
     """
     return AuthService(db)
+
