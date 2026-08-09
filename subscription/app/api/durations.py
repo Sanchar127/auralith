@@ -1,3 +1,4 @@
+
 from uuid import UUID
 
 from fastapi import (
@@ -7,24 +8,14 @@ from fastapi import (
     status,
 )
 
-from app.dependencies.auth import (
-    get_current_user,
-    require_admin,
-)
-
-from app.dependencies.duration import (
-    get_duration_service,
-)
-
+from app.dependencies.auth import get_current_user
+from app.dependencies.duration import get_duration_service
 from app.schemas.duration import (
     SubscriptionDurationCreate,
     SubscriptionDurationUpdate,
     SubscriptionDurationResponse,
 )
-
-from app.services.duration import (
-    SubscriptionDurationService,
-)
+from app.services.duration import SubscriptionDurationService
 
 
 router = APIRouter(
@@ -33,9 +24,8 @@ router = APIRouter(
 )
 
 
-
 # ---------------------------------------------------------
-# Create Duration (ADMIN)
+# Create Duration
 # ---------------------------------------------------------
 
 @router.post(
@@ -44,22 +34,13 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_duration(
-
     payload: SubscriptionDurationCreate,
-
-    admin=Depends(
-        require_admin
-    ),
-
+    current_user=Depends(get_current_user),
     service: SubscriptionDurationService = Depends(
-        get_duration_service
+        get_duration_service,
     ),
 ):
-
-    return await service.create_duration(
-        payload
-    )
-
+    return await service.create_duration(payload)
 
 
 # ---------------------------------------------------------
@@ -71,22 +52,15 @@ async def create_duration(
     response_model=list[SubscriptionDurationResponse],
 )
 async def list_durations(
-
     active_only: bool = False,
-
-    user_id=Depends(
-        get_current_user
-    ),
-
+    current_user=Depends(get_current_user),
     service: SubscriptionDurationService = Depends(
-        get_duration_service
+        get_duration_service,
     ),
 ):
-
     return await service.list_durations(
-        active_only
+        active_only,
     )
-
 
 
 # ---------------------------------------------------------
@@ -98,36 +72,27 @@ async def list_durations(
     response_model=SubscriptionDurationResponse,
 )
 async def get_duration(
-
     duration_id: UUID,
-
-    user_id=Depends(
-        get_current_user
-    ),
-
+    current_user=Depends(get_current_user),
     service: SubscriptionDurationService = Depends(
-        get_duration_service
+        get_duration_service,
     ),
 ):
-
     duration = await service.get_duration(
-        duration_id
+        duration_id,
     )
-
 
     if duration is None:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Duration not found",
         )
-
 
     return duration
 
 
-
 # ---------------------------------------------------------
-# Update Duration (ADMIN)
+# Update Duration
 # ---------------------------------------------------------
 
 @router.patch(
@@ -135,69 +100,52 @@ async def get_duration(
     response_model=SubscriptionDurationResponse,
 )
 async def update_duration(
-
     duration_id: UUID,
-
     payload: SubscriptionDurationUpdate,
-
-    admin=Depends(
-        require_admin
-    ),
-
+    current_user=Depends(get_current_user),
     service: SubscriptionDurationService = Depends(
-        get_duration_service
+        get_duration_service,
     ),
 ):
-
     duration = await service.update_duration(
         duration_id,
         payload,
     )
 
-
     if duration is None:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Duration not found",
         )
-
 
     return duration
 
 
-
 # ---------------------------------------------------------
-# Delete Duration (ADMIN)
+# Delete Duration
 # ---------------------------------------------------------
 
 @router.delete(
     "/{duration_id}",
 )
 async def delete_duration(
-
     duration_id: UUID,
-
-    admin=Depends(
-        require_admin
-    ),
-
+    current_user=Depends(get_current_user),
     service: SubscriptionDurationService = Depends(
-        get_duration_service
+        get_duration_service,
     ),
 ):
-
     deleted = await service.delete_duration(
-        duration_id
+        duration_id,
     )
-
 
     if not deleted:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Duration not found",
         )
 
-
     return {
-        "message": "Duration deleted"
+        "message": "Duration deleted",
     }
+

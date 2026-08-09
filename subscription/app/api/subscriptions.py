@@ -51,44 +51,29 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_subscription(
-
     payload: SubscribeRequest,
-
-    current_user=Depends(
-        get_current_user
-    ),
-
+    current_user=Depends(get_current_user),
     service: SubscriptionService = Depends(
-        get_subscription_service
+        get_subscription_service,
     ),
 ):
-
     try:
-
         return await service.create_subscription(
-
-            user_id=current_user.id,
-
+            user_id=UUID(current_user["id"]),
             price_id=payload.price_id,
         )
 
-
     except SubscriptionAlreadyActiveError as exc:
-
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
-
 
     except SubscriptionNotFoundError as exc:
-
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         )
-
-
 
 # =========================================================
 # List All Subscriptions
@@ -112,9 +97,9 @@ async def list_subscriptions(
         le=100,
     ),
 
-    admin=Depends(
-        require_admin
-    ),
+    # admin=Depends(
+    #     require_admin
+    # ),
 
     service: SubscriptionService = Depends(
         get_subscription_service

@@ -1,18 +1,32 @@
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Request,
+    status,
+)
+from fastapi.security import (
+    OAuth2PasswordBearer,
+    OAuth2PasswordRequestForm,
+)
 
+from app.core.dependencies import (
+    CurrentUser,
+    get_auth_service,
+)
+from app.core.logger import logger
 from app.schemas.auth import (
-    LoginRequest,
-    RegisterRequest,
     GoogleLoginRequest,
+    LoginRequest,
     RefreshTokenRequest,
+    RegisterRequest,
     TokenResponse,
 )
 from app.schemas.user import UserResponse
 from app.services.auth.user import AuthService
 
-from app.core.dependencies import (
-    CurrentUser,
-    get_auth_service,
+
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/api/v1/auth/token",
 )
 
 router = APIRouter(
@@ -20,6 +34,10 @@ router = APIRouter(
     tags=["Authentication"],
 )
 
+
+# ==========================================================
+# Register
+# ==========================================================
 
 @router.post(
     "/register",
@@ -31,11 +49,29 @@ async def register(
     auth_service: AuthService = Depends(get_auth_service),
 ):
     """
-    Register a new user using email/password.
+    Register a new account.
     """
 
-    return await auth_service.register(payload)
+    logger.info(
+        "Registration request received email=%s",
+        payload.email,
+    )
 
+    user = await auth_service.register(
+        payload,
+    )
+
+    logger.info(
+        "Registration completed user_id=%s",
+        user.id,
+    )
+
+    return user
+
+
+# ==========================================================
+# Login (JSON)
+# ==========================================================
 
 @router.post(
     "/login",
@@ -47,15 +83,72 @@ async def login(
     auth_service: AuthService = Depends(get_auth_service),
 ):
     """
-    Login using email/password.
+    Login using JSON payload.
     """
 
-    return await auth_service.login(
+    logger.info(
+        "Login request email=%s",
+        payload.email,
+    )
+
+    token = await auth_service.login(
         payload=payload,
         ip=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
 
+    logger.info(
+        "Login successful email=%s",
+        payload.email,
+    )
+
+    return token
+
+
+# ==========================================================
+# OAuth2 Login (Swagger)
+# ==========================================================
+
+@router.post(
+    "/token",
+    response_model=TokenResponse,
+)
+async def token_login(
+    request: Request,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """
+    OAuth2 password flow endpoint for Swagger UI.
+    """
+
+    logger.info(
+        "OAuth2 login request username=%s",
+        form_data.username,
+    )
+
+    payload = LoginRequest(
+        email=form_data.username,
+        password=form_data.password,
+    )
+
+    token = await auth_service.login(
+        payload=payload,
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+    logger.info(
+        "OAuth2 login successful username=%s",
+        form_data.username,
+    )
+
+    return token
+
+
+# ==========================================================
+# Google Login
+# ==========================================================
 
 @router.post(
     "/google",
@@ -67,15 +160,29 @@ async def google_login(
     auth_service: AuthService = Depends(get_auth_service),
 ):
     """
-    Login using Google OAuth.
+    Google OAuth login.
     """
 
-    return await auth_service.google_login(
+    logger.info(
+        "Google login request received."
+    )
+
+    token = await auth_service.google_login(
         payload=payload,
         ip=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
 
+    logger.info(
+        "Google login successful."
+    )
+
+    return token
+
+
+# ==========================================================
+# Refresh Token
+# ==========================================================
 
 @router.post(
     "/refresh",
@@ -89,8 +196,24 @@ async def refresh_token(
     Refresh access token.
     """
 
-    return await auth_service.refresh_token(payload)
+    logger.info(
+        "Refresh token request received."
+    )
 
+    token = await auth_service.refresh_token(
+        payload,
+    )
+
+    logger.info(
+        "Access token refreshed successfully."
+    )
+
+    return token
+
+
+# ==========================================================
+# Logout
+# ==========================================================
 
 @router.post(
     "/logout",
@@ -105,11 +228,25 @@ async def logout(
     Logout current device.
     """
 
+    logger.info(
+        "Logout request user_id=%s",
+        current_user.id,
+    )
+
     await auth_service.logout(
         current_user=current_user,
         refresh_token=refresh_token.refresh_token,
     )
 
+    logger.info(
+        "Logout completed user_id=%s",
+        current_user.id,
+    )
+
+
+# ==========================================================
+# Logout All
+# ==========================================================
 
 @router.post(
     "/logout-all",
@@ -120,11 +257,27 @@ async def logout_all(
     auth_service: AuthService = Depends(get_auth_service),
 ):
     """
-    Logout all devices.
+    Logout all active sessions.
     """
 
-    await auth_service.logout_all(current_user)
+    logger.info(
+        "Logout-all request user_id=%s",
+        current_user.id,
+    )
 
+    await auth_service.logout_all(
+        current_user,
+    )
+
+    logger.info(
+        "Logout-all completed user_id=%s",
+        current_user.id,
+    )
+
+
+# ==========================================================
+# Current User
+# ==========================================================
 
 @router.get(
     "/me",
@@ -136,5 +289,10 @@ async def get_me(
     """
     Return authenticated user.
     """
+
+    logger.debug(
+        "Current user requested profile user_id=%s",
+        current_user.id,
+    )
 
     return current_user

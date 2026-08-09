@@ -53,11 +53,20 @@ class WalletService:
 
     async def create_wallet(
         self,
-        payload: WalletCreate,
+        wallet_data: dict,  # Changed from payload: WalletCreate to dict
     ):
+        """
+        Create a wallet for a user.
+        
+        Args:
+            wallet_data: Dict with 'user_id' and 'initial_tokens'
+        """
+        # Extract data from dict
+        user_id = wallet_data.get("user_id")
+        initial_tokens = wallet_data.get("initial_tokens", 0)
 
         existing = await self.repo.get_by_user(
-            payload.user_id
+            user_id
         )
 
 
@@ -67,8 +76,8 @@ class WalletService:
 
 
         wallet = TokenWallet(
-            user_id=payload.user_id,
-            available_tokens=payload.initial_tokens,
+            user_id=user_id,
+            available_tokens=initial_tokens,
             lifetime_used_tokens=0,
         )
 

@@ -83,14 +83,14 @@ async def chat(
 
     logger.info(
         "Chat request user=%s",
-        current_user["id"],
+        str(current_user.id)
     )
 
 
 
     response = await chat_service.chat(
 
-        user_id=current_user["id"],
+        user_id=str(current_user.id),
 
         conversation_id=conversation_id,
 

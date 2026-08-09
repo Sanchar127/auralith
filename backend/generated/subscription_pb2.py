@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12subscription.proto\x12\x0csubscription\")\n\x16GetSubscriptionRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\"@\n\x14SubscriptionResponse\x12\x0e\n\x06\x61\x63tive\x18\x01 \x01(\x08\x12\x18\n\x10remaining_tokens\x18\x02 \x01(\x05\x32r\n\x13SubscriptionService\x12[\n\x0fGetSubscription\x12$.subscription.GetSubscriptionRequest\x1a\".subscription.SubscriptionResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12subscription.proto\x12\x0csubscription\")\n\x16GetSubscriptionRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\"@\n\x14SubscriptionResponse\x12\x0e\n\x06\x61\x63tive\x18\x01 \x01(\x08\x12\x18\n\x10remaining_tokens\x18\x02 \x01(\x03\"d\n\x14ReserveTokensRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x18\n\x10\x65stimated_tokens\x18\x02 \x01(\x03\x12\x12\n\nrequest_id\x18\x03 \x01(\t\x12\r\n\x05model\x18\x04 \x01(\t\"\x84\x01\n\x15ReserveTokensResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x16\n\x0ereservation_id\x18\x02 \x01(\t\x12\x17\n\x0freserved_tokens\x18\x03 \x01(\x03\x12\x18\n\x10remaining_tokens\x18\x04 \x01(\x03\x12\x0f\n\x07message\x18\x05 \x01(\t\"\xa4\x01\n\x13SettleTokensRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x16\n\x0ereservation_id\x18\x02 \x01(\t\x12\x12\n\nrequest_id\x18\x03 \x01(\t\x12\x14\n\x0cinput_tokens\x18\x04 \x01(\x03\x12\x15\n\routput_tokens\x18\x05 \x01(\x03\x12\x14\n\x0ctotal_tokens\x18\x06 \x01(\x03\x12\r\n\x05model\x18\x07 \x01(\t\"\x83\x01\n\x14SettleTokensResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x16\n\x0e\x63harged_tokens\x18\x02 \x01(\x03\x12\x17\n\x0frefunded_tokens\x18\x03 \x01(\x03\x12\x18\n\x10remaining_tokens\x18\x04 \x01(\x03\x12\x0f\n\x07message\x18\x05 \x01(\t\"S\n\x14ReleaseTokensRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x16\n\x0ereservation_id\x18\x02 \x01(\t\x12\x12\n\nrequest_id\x18\x03 \x01(\t\"l\n\x15ReleaseTokensResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x17\n\x0freleased_tokens\x18\x02 \x01(\x03\x12\x18\n\x10remaining_tokens\x18\x03 \x01(\x03\x12\x0f\n\x07message\x18\x04 \x01(\t2\xfd\x02\n\x13SubscriptionService\x12[\n\x0fGetSubscription\x12$.subscription.GetSubscriptionRequest\x1a\".subscription.SubscriptionResponse\x12X\n\rReserveTokens\x12\".subscription.ReserveTokensRequest\x1a#.subscription.ReserveTokensResponse\x12U\n\x0cSettleTokens\x12!.subscription.SettleTokensRequest\x1a\".subscription.SettleTokensResponse\x12X\n\rReleaseTokens\x12\".subscription.ReleaseTokensRequest\x1a#.subscription.ReleaseTokensResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -35,6 +35,18 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_GETSUBSCRIPTIONREQUEST']._serialized_end=77
   _globals['_SUBSCRIPTIONRESPONSE']._serialized_start=79
   _globals['_SUBSCRIPTIONRESPONSE']._serialized_end=143
-  _globals['_SUBSCRIPTIONSERVICE']._serialized_start=145
-  _globals['_SUBSCRIPTIONSERVICE']._serialized_end=259
+  _globals['_RESERVETOKENSREQUEST']._serialized_start=145
+  _globals['_RESERVETOKENSREQUEST']._serialized_end=245
+  _globals['_RESERVETOKENSRESPONSE']._serialized_start=248
+  _globals['_RESERVETOKENSRESPONSE']._serialized_end=380
+  _globals['_SETTLETOKENSREQUEST']._serialized_start=383
+  _globals['_SETTLETOKENSREQUEST']._serialized_end=547
+  _globals['_SETTLETOKENSRESPONSE']._serialized_start=550
+  _globals['_SETTLETOKENSRESPONSE']._serialized_end=681
+  _globals['_RELEASETOKENSREQUEST']._serialized_start=683
+  _globals['_RELEASETOKENSREQUEST']._serialized_end=766
+  _globals['_RELEASETOKENSRESPONSE']._serialized_start=768
+  _globals['_RELEASETOKENSRESPONSE']._serialized_end=876
+  _globals['_SUBSCRIPTIONSERVICE']._serialized_start=879
+  _globals['_SUBSCRIPTIONSERVICE']._serialized_end=1260
 # @@protoc_insertion_point(module_scope)

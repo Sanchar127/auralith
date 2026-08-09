@@ -39,12 +39,45 @@ class SubscriptionServiceStub:
                 request_serializer=subscription__pb2.GetSubscriptionRequest.SerializeToString,
                 response_deserializer=subscription__pb2.SubscriptionResponse.FromString,
                 _registered_method=True)
+        self.ReserveTokens = channel.unary_unary(
+                '/subscription.SubscriptionService/ReserveTokens',
+                request_serializer=subscription__pb2.ReserveTokensRequest.SerializeToString,
+                response_deserializer=subscription__pb2.ReserveTokensResponse.FromString,
+                _registered_method=True)
+        self.SettleTokens = channel.unary_unary(
+                '/subscription.SubscriptionService/SettleTokens',
+                request_serializer=subscription__pb2.SettleTokensRequest.SerializeToString,
+                response_deserializer=subscription__pb2.SettleTokensResponse.FromString,
+                _registered_method=True)
+        self.ReleaseTokens = channel.unary_unary(
+                '/subscription.SubscriptionService/ReleaseTokens',
+                request_serializer=subscription__pb2.ReleaseTokensRequest.SerializeToString,
+                response_deserializer=subscription__pb2.ReleaseTokensResponse.FromString,
+                _registered_method=True)
 
 
 class SubscriptionServiceServicer:
     """Missing associated documentation comment in .proto file."""
 
     def GetSubscription(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReserveTokens(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def SettleTokens(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ReleaseTokens(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -57,6 +90,21 @@ def add_SubscriptionServiceServicer_to_server(servicer, server):
                     servicer.GetSubscription,
                     request_deserializer=subscription__pb2.GetSubscriptionRequest.FromString,
                     response_serializer=subscription__pb2.SubscriptionResponse.SerializeToString,
+            ),
+            'ReserveTokens': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReserveTokens,
+                    request_deserializer=subscription__pb2.ReserveTokensRequest.FromString,
+                    response_serializer=subscription__pb2.ReserveTokensResponse.SerializeToString,
+            ),
+            'SettleTokens': grpc.unary_unary_rpc_method_handler(
+                    servicer.SettleTokens,
+                    request_deserializer=subscription__pb2.SettleTokensRequest.FromString,
+                    response_serializer=subscription__pb2.SettleTokensResponse.SerializeToString,
+            ),
+            'ReleaseTokens': grpc.unary_unary_rpc_method_handler(
+                    servicer.ReleaseTokens,
+                    request_deserializer=subscription__pb2.ReleaseTokensRequest.FromString,
+                    response_serializer=subscription__pb2.ReleaseTokensResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -86,6 +134,87 @@ class SubscriptionService:
             '/subscription.SubscriptionService/GetSubscription',
             subscription__pb2.GetSubscriptionRequest.SerializeToString,
             subscription__pb2.SubscriptionResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReserveTokens(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/subscription.SubscriptionService/ReserveTokens',
+            subscription__pb2.ReserveTokensRequest.SerializeToString,
+            subscription__pb2.ReserveTokensResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def SettleTokens(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/subscription.SubscriptionService/SettleTokens',
+            subscription__pb2.SettleTokensRequest.SerializeToString,
+            subscription__pb2.SettleTokensResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ReleaseTokens(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/subscription.SubscriptionService/ReleaseTokens',
+            subscription__pb2.ReleaseTokensRequest.SerializeToString,
+            subscription__pb2.ReleaseTokensResponse.FromString,
             options,
             channel_credentials,
             insecure,

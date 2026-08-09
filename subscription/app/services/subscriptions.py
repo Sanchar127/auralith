@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Optional, List
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.db.model.token_wallet import TokenWallet
 from app.db.model.usersubscription import (
@@ -35,6 +37,7 @@ class SubscriptionService:
         db: AsyncSession,
     ) -> None:
         self.repo = SubscriptionRepository(db)
+        self.db = db  # Add this line to access db directly
 
     # ---------------------------------------------------------
     # Queries
@@ -80,6 +83,32 @@ class SubscriptionService:
             True,
             wallet.available_tokens,
         )
+
+    # ADD THIS NEW METHOD
+    async def list_subscriptions(
+        self,
+        user_id: Optional[uuid.UUID] = None,
+        status: Optional[SubscriptionStatus] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[UserSubscription]:
+        """
+        List all subscriptions with optional filters.
+        Used by admin endpoints.
+        """
+        query = select(UserSubscription)
+        
+        # Apply filters
+        if user_id:
+            query = query.where(UserSubscription.user_id == user_id)
+        if status:
+            query = query.where(UserSubscription.status == status)
+        
+        # Apply pagination
+        query = query.offset(skip).limit(limit)
+        
+        result = await self.db.execute(query)
+        return result.scalars().all()
 
     # ---------------------------------------------------------
     # Commands

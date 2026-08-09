@@ -16,8 +16,8 @@ services:
     working_dir: /app/backend
 
     ports:
-      - "${API_PORT}:8000"
-
+      - "8000:8000"
+      - "50051:50051"
     volumes:
       - .:/app
       - ./contracts:/app/contracts

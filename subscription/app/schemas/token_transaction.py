@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict
 
 class TokenTransactionCreate(BaseModel):
 
-    user_id: UUID
 
     conversation_id: UUID | None = None
 
@@ -30,7 +29,6 @@ class TokenTransactionResponse(BaseModel):
 
     id: UUID
 
-    user_id: UUID
 
     type: str
 

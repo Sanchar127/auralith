@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, UTC
+from datetime import UTC, datetime
+from uuid import UUID
 
 from sqlalchemy import select
 
@@ -12,6 +13,25 @@ class UserRepository(BaseRepository[User]):
 
     model = User
 
+
+    async def get_by_id(
+        self,
+        user_id: UUID | str,
+    ) -> User | None:
+
+        stmt = (
+            select(User)
+            .where(User.id == user_id)
+        )
+
+        result = await self.session.execute(
+            stmt
+        )
+
+        return result.scalar_one_or_none()
+
+
+
     async def get_by_email(
         self,
         email: str,
@@ -19,12 +39,18 @@ class UserRepository(BaseRepository[User]):
 
         stmt = (
             select(User)
-            .where(User.email == email.lower())
+            .where(
+                User.email == email.lower()
+            )
         )
 
-        result = await self.session.execute(stmt)
+        result = await self.session.execute(
+            stmt
+        )
 
         return result.scalar_one_or_none()
+
+
 
     async def get_by_google_id(
         self,
@@ -33,21 +59,31 @@ class UserRepository(BaseRepository[User]):
 
         stmt = (
             select(User)
-            .where(User.google_id == google_id)
+            .where(
+                User.google_id == google_id
+            )
         )
 
-        result = await self.session.execute(stmt)
+        result = await self.session.execute(
+            stmt
+        )
 
         return result.scalar_one_or_none()
+
+
 
     async def exists(
         self,
         email: str,
     ) -> bool:
 
-        return (
-            await self.get_by_email(email)
-        ) is not None
+        user = await self.get_by_email(
+            email
+        )
+
+        return user is not None
+
+
 
     async def mark_verified(
         self,
@@ -56,16 +92,26 @@ class UserRepository(BaseRepository[User]):
 
         user.is_verified = True
 
-        return await self.save(user)
+        return await self.save(
+            user
+        )
+
+
 
     async def update_last_login(
         self,
         user: User,
     ) -> User:
 
-        user.last_login_at = datetime.now(UTC)
+        user.last_login_at = datetime.now(
+            UTC
+        )
 
-        return await self.save(user)
+        return await self.save(
+            user
+        )
+
+
 
     async def activate(
         self,
@@ -74,7 +120,11 @@ class UserRepository(BaseRepository[User]):
 
         user.is_active = True
 
-        return await self.save(user)
+        return await self.save(
+            user
+        )
+
+
 
     async def deactivate(
         self,
@@ -83,4 +133,6 @@ class UserRepository(BaseRepository[User]):
 
         user.is_active = False
 
-        return await self.save(user)
+        return await self.save(
+            user
+        )

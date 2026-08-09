@@ -5,8 +5,14 @@ from pydantic import BaseModel, ConfigDict
 
 
 class SubscribeRequest(BaseModel):
-    user_id: UUID
+    """
+    Request body for creating a subscription.
+
+    user_id comes from JWT token.
+    """
+
     price_id: UUID
+
 
 
 class SubscriptionUpdate(BaseModel):
@@ -19,19 +25,24 @@ class SubscriptionUpdate(BaseModel):
     expires_at: datetime | None = None
 
 
+
 class SubscriptionResponse(BaseModel):
+
     id: UUID
 
-    user_id: UUID
+
     plan_id: UUID
+
     subscription_price_id: UUID
 
     status: str
 
     starts_at: datetime
+
     expires_at: datetime
 
     auto_renew: bool
+
 
     model_config = ConfigDict(
         from_attributes=True,
