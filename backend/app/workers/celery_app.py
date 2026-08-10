@@ -16,6 +16,3 @@ celery.conf.update(
 celery.autodiscover_tasks(
     ["app.tasks"],
 )
-
-# Force import so Celery registers them immediately
-import app.tasks.song

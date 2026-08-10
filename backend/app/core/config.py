@@ -141,6 +141,9 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = Field(
         default=False
     )
+    MAX_AUDIO_SIZE: int = Field(
+        default=52428800
+    )
 
     # ==========================================================
     # CORS

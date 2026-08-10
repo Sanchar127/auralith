@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package deepfilter;
+
+service DeepFilterService {
+  rpc EnhanceAudio(EnhanceAudioRequest)
+      returns (EnhanceAudioResponse);
+
+  rpc GetJobStatus(GetJobStatusRequest)
+      returns (GetJobStatusResponse);
+
+  rpc CancelJob(CancelJobRequest)
+      returns (CancelJobResponse);
+
+  rpc HealthCheck(HealthCheckRequest)
+      returns (HealthCheckResponse);
+}
+
+message EnhanceAudioRequest {
+  string job_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+
+  string input_bucket = 4;
+  string input_object_key = 5;
+
+  string output_bucket = 6;
+  string output_object_key = 7;
+
+  AudioEnhancementOptions options = 8;
+
+  map<string, string> metadata = 9;
+}
+
+message AudioEnhancementOptions {
+  bool noise_reduction = 1;
+  bool dereverberation = 2;
+  bool gain_normalization = 3;
+
+  int32 sample_rate = 4;
+  int32 channels = 5;
+
+  string output_format = 6;
+  int32 bitrate = 7;
+}
+
+message EnhanceAudioResponse {
+  string job_id = 1;
+
+  JobStatus status = 2;
+
+  string output_bucket = 3;
+  string output_object_key = 4;
+
+  ProcessingMetadata processing = 5;
+  Error error = 6;
+}
+
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  QUEUED = 1;
+  PROCESSING = 2;
+  COMPLETED = 3;
+  FAILED = 4;
+  CANCELLED = 5;
+}
+
+message ProcessingMetadata {
+  double input_duration_seconds = 1;
+  double output_duration_seconds = 2;
+
+  int32 input_sample_rate = 3;
+  int32 output_sample_rate = 4;
+
+  int32 input_channels = 5;
+  int32 output_channels = 6;
+
+  int64 processing_time_ms = 7;
+
+  int64 input_size_bytes = 8;
+  int64 output_size_bytes = 9;
+
+  string model_version = 10;
+}
+
+message Error {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+}
+
+message GetJobStatusRequest {
+  string job_id = 1;
+}
+
+message GetJobStatusResponse {
+  string job_id = 1;
+
+  JobStatus status = 2;
+
+  string output_bucket = 3;
+  string output_object_key = 4;
+
+  ProcessingMetadata processing = 5;
+  Error error = 6;
+}
+
+message CancelJobRequest {
+  string job_id = 1;
+}
+
+message CancelJobResponse {
+  string job_id = 1;
+
+  bool success = 2;
+
+  JobStatus status = 3;
+
+  Error error = 4;
+}
+
+message HealthCheckRequest {
+  string service = 1;
+}
+
+message HealthCheckResponse {
+  HealthStatus status = 1;
+  string service = 2;
+  string version = 3;
+}
+
+enum HealthStatus {
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  HEALTHY = 1;
+  UNHEALTHY = 2;
+  DEGRADED = 3;
+}

@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import enum
@@ -26,11 +27,19 @@ class AuthProvider(str, enum.Enum):
 class User(Base):
     __tablename__ = "users"
 
+    # =========================================================
+    # Primary Key
+    # =========================================================
+
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
     )
+
+    # =========================================================
+    # Authentication
+    # =========================================================
 
     email: Mapped[str] = mapped_column(
         String(255),
@@ -54,8 +63,15 @@ class User(Base):
         nullable=True,
     )
 
+    # IMPORTANT:
+    # The existing PostgreSQL enum is named "authprovider".
+    # Keep this name so Alembic does not try to rename it.
+
     provider: Mapped[AuthProvider] = mapped_column(
-        Enum(AuthProvider),
+        Enum(
+            AuthProvider,
+            name="authprovider",
+        ),
         default=AuthProvider.LOCAL,
         nullable=False,
     )
@@ -65,6 +81,10 @@ class User(Base):
         unique=True,
         nullable=True,
     )
+
+    # =========================================================
+    # Account Status
+    # =========================================================
 
     is_active: Mapped[bool] = mapped_column(
         Boolean,
@@ -77,6 +97,10 @@ class User(Base):
         default=False,
         nullable=False,
     )
+
+    # =========================================================
+    # Login / Timestamps
+    # =========================================================
 
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -96,9 +120,9 @@ class User(Base):
         nullable=False,
     )
 
-    # -------------------------
+    # =========================================================
     # Relationships
-    # -------------------------
+    # =========================================================
 
     conversations = relationship(
         "Conversation",
@@ -112,27 +136,8 @@ class User(Base):
         cascade="all, delete-orphan",
     )
 
-    songs = relationship(
-        "Song",
+    audio_jobs = relationship(
+        "AudioJob",
         back_populates="user",
-        cascade="all, delete-orphan",
-    )
-
-
-    subscriptions = relationship(
-    "UserSubscription",
-    back_populates="user",
-    cascade="all, delete-orphan",
-    )
-
-    token_wallet = relationship(
-        "TokenWallet",
-        back_populates="user",
-        uselist=False,
-        cascade="all, delete-orphan",
-    )
-
-    token_transactions = relationship(
-        "TokenTransaction",
         cascade="all, delete-orphan",
     )

@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from uuid import uuid4
@@ -21,11 +22,19 @@ from app.db.base import Base
 class Conversation(Base):
     __tablename__ = "conversations"
 
+    # =========================================================
+    # Primary Key
+    # =========================================================
+
     id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid4,
     )
+
+    # =========================================================
+    # User
+    # =========================================================
 
     user_id: Mapped[UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -37,11 +46,19 @@ class Conversation(Base):
         index=True,
     )
 
+    # =========================================================
+    # Conversation
+    # =========================================================
+
     title: Mapped[str] = mapped_column(
         String(255),
         default="New Conversation",
         nullable=False,
     )
+
+    # =========================================================
+    # Timestamps
+    # =========================================================
 
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True),
@@ -56,9 +73,9 @@ class Conversation(Base):
         nullable=False,
     )
 
-    # -------------------------
+    # =========================================================
     # Relationships
-    # -------------------------
+    # =========================================================
 
     user = relationship(
         "User",
@@ -72,8 +89,9 @@ class Conversation(Base):
         order_by="Message.created_at",
     )
 
-    songs = relationship(
-        "Song",
+    audio_jobs = relationship(
+        "AudioJob",
         back_populates="conversation",
         cascade="all, delete-orphan",
     )
+
