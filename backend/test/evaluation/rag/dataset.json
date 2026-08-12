@@ -1,6 +1,7 @@
 [
   {
     "query": "How does audio enhancement work?",
+    "type": "supported",
     "relevant_chunk_ids": [
       "chunk-123",
       "chunk-456"
@@ -8,14 +9,34 @@
   },
   {
     "query": "How can I generate a song?",
+    "type": "supported",
     "relevant_chunk_ids": [
       "chunk-789"
     ]
   },
   {
     "query": "What audio formats are supported?",
+    "type": "supported",
     "relevant_chunk_ids": [
       "chunk-111"
+    ]
+  },
+  {
+    "query": "What is the CEO's favorite food?",
+    "type": "unsupported",
+    "relevant_chunk_ids": []
+  },
+  {
+    "query": "What programming language does the CEO's private project use?",
+    "type": "unsupported",
+    "relevant_chunk_ids": []
+  },
+  {
+    "query": "How does audio enhancement work and who invented the technology?",
+    "type": "partial",
+    "relevant_chunk_ids": [
+      "chunk-123",
+      "chunk-456"
     ]
   }
 ]

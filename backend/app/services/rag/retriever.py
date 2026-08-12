@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from typing import Any
@@ -12,13 +11,16 @@ class RAGRetriever:
     """
     Retrieves relevant knowledge from Qdrant.
 
-    The chunk identifier can come from either:
+    Responsibilities:
 
-    1. The payload's ``chunk_id`` field.
-    2. The Qdrant point ID.
-
-    This keeps retrieval compatible with both indexed
-    production documents and unit-test fixtures.
+    1. Generate query embeddings.
+    2. Search Qdrant.
+    3. Filter low-relevance results.
+    4. Resolve chunk IDs.
+    5. Normalize retrieved documents.
+    6. Remove duplicate chunks.
+    7. Sort results by relevance score.
+    8. Format retrieved documents for the LLM.
     """
 
     def __init__(
@@ -29,6 +31,10 @@ class RAGRetriever:
         self.top_k = top_k
         self.score_threshold = score_threshold
 
+    # ==========================================================
+    # Retrieval
+    # ==========================================================
+
     async def retrieve(
         self,
         query: str,
@@ -36,34 +42,72 @@ class RAGRetriever:
         """
         Retrieve relevant chunks for a query.
 
+        Duplicate chunk IDs are removed. If multiple Qdrant
+        points contain the same chunk_id, only the result
+        with the highest relevance score is retained.
+
         Args:
-            query: User's search query.
+            query: User search query.
 
         Returns:
-            A list of normalized retrieved documents.
+            A list of normalized unique documents ordered
+            by descending relevance score.
         """
 
-        # Ignore empty or whitespace-only queries.
-        if not query.strip():
+        # ------------------------------------------------------
+        # Validate query
+        # ------------------------------------------------------
+
+        if not query or not query.strip():
             return []
 
-        logger.info("Retrieving context for query.")
+        logger.info(
+            "Retrieving context for query."
+        )
 
-        # Generate embedding for the query.
-        query_embedding = await embedding_service.embed(query)
+        # ------------------------------------------------------
+        # Generate query embedding
+        # ------------------------------------------------------
 
-        # Search Qdrant using the generated embedding.
+        query_embedding = await embedding_service.embed(
+            query
+        )
+
+        # ------------------------------------------------------
+        # Search Qdrant
+        # ------------------------------------------------------
+
         results = await vector_store.search(
             embedding=query_embedding,
             limit=self.top_k,
         )
 
-        documents: list[dict[str, Any]] = []
+        # ------------------------------------------------------
+        # Deduplicated documents
+        #
+        # Key:
+        #     chunk_id
+        #
+        # Value:
+        #     highest-scoring document for that chunk
+        # ------------------------------------------------------
+
+        documents_by_chunk_id: dict[
+            str,
+            dict[str, Any],
+        ] = {}
+
+        # ------------------------------------------------------
+        # Process Qdrant results
+        # ------------------------------------------------------
 
         for result in results:
             score = float(result.score)
 
-            # Filter low-relevance results.
+            # --------------------------------------------------
+            # Filter low-relevance results
+            # --------------------------------------------------
+
             if score < self.score_threshold:
                 continue
 
@@ -71,23 +115,29 @@ class RAGRetriever:
 
             # --------------------------------------------------
             # Resolve chunk ID
-            # --------------------------------------------------
             #
-            # Prefer the explicit chunk_id stored in the payload.
-            # Fall back to the Qdrant point ID.
+            # Prefer payload.chunk_id.
+            # Fall back to Qdrant point ID.
             # --------------------------------------------------
 
-            payload_chunk_id = payload.get("chunk_id")
+            payload_chunk_id = payload.get(
+                "chunk_id"
+            )
 
             if payload_chunk_id is not None:
-                chunk_id = str(payload_chunk_id)
+                chunk_id = str(
+                    payload_chunk_id
+                )
 
             elif result.id is not None:
-                chunk_id = str(result.id)
+                chunk_id = str(
+                    result.id
+                )
 
             else:
                 logger.warning(
-                    "Qdrant result has no usable chunk_id."
+                    "Qdrant result has no usable "
+                    "chunk_id. Skipping result."
                 )
                 continue
 
@@ -95,14 +145,20 @@ class RAGRetriever:
             # Extract text
             # --------------------------------------------------
 
-            text = payload.get("text", "")
+            text = payload.get(
+                "text",
+                "",
+            )
 
             if not isinstance(text, str):
                 text = str(text)
 
-            if not text.strip():
+            text = text.strip()
+
+            if not text:
                 logger.warning(
-                    "Qdrant result %s has empty text.",
+                    "Qdrant result %s has empty text. "
+                    "Skipping result.",
                     chunk_id,
                 )
                 continue
@@ -114,41 +170,124 @@ class RAGRetriever:
             metadata = {
                 key: value
                 for key, value in payload.items()
-                if key not in {"text", "chunk_id"}
+                if key not in {
+                    "text",
+                    "chunk_id",
+                }
             }
 
             # --------------------------------------------------
-            # Build normalized retrieval result
+            # Build normalized document
             # --------------------------------------------------
 
-            documents.append(
-                {
-                    "chunk_id": chunk_id,
-                    "text": text,
-                    "score": score,
-                    "metadata": metadata,
-                }
+            document: dict[str, Any] = {
+                "chunk_id": chunk_id,
+                "text": text,
+                "score": score,
+                "metadata": metadata,
+            }
+
+            # --------------------------------------------------
+            # Deduplicate
+            # --------------------------------------------------
+            #
+            # Same chunk may exist multiple times in Qdrant.
+            #
+            # Example:
+            #
+            # chunk-123 score=0.91
+            # chunk-123 score=0.87
+            # chunk-123 score=0.72
+            #
+            # Keep only:
+            #
+            # chunk-123 score=0.91
+            # --------------------------------------------------
+
+            existing_document = (
+                documents_by_chunk_id.get(
+                    chunk_id
+                )
             )
 
+            if existing_document is None:
+                documents_by_chunk_id[
+                    chunk_id
+                ] = document
+
+                continue
+
+            existing_score = float(
+                existing_document["score"]
+            )
+
+            if score > existing_score:
+                logger.debug(
+                    "Replacing duplicate chunk '%s' "
+                    "with higher-scoring result: "
+                    "%.4f -> %.4f",
+                    chunk_id,
+                    existing_score,
+                    score,
+                )
+
+                documents_by_chunk_id[
+                    chunk_id
+                ] = document
+
+            else:
+                logger.debug(
+                    "Ignoring duplicate chunk '%s' "
+                    "with lower score %.4f.",
+                    chunk_id,
+                    score,
+                )
+
+        # ------------------------------------------------------
+        # Convert dictionary to list
+        # ------------------------------------------------------
+
+        documents = list(
+            documents_by_chunk_id.values()
+        )
+
+        # ------------------------------------------------------
+        # Explicitly order by relevance
+        # ------------------------------------------------------
+        #
+        # Even though Qdrant normally returns results ordered
+        # by score, we enforce the contract here.
+        # ------------------------------------------------------
+
+        documents.sort(
+            key=lambda document: float(
+                document["score"]
+            ),
+            reverse=True,
+        )
+
         logger.info(
-            "Retrieved %s relevant chunks.",
+            "Retrieved %d unique relevant chunks.",
             len(documents),
         )
 
         return documents
+
+    # ==========================================================
+    # Context generation
+    # ==========================================================
 
     async def retrieve_context(
         self,
         query: str,
     ) -> str:
         """
-        Convert retrieved documents into LLM-ready context.
+        Retrieve relevant documents and convert them
+        into LLM-ready context.
 
-        Args:
-            query: User's search query.
-
-        Returns:
-            Formatted context string suitable for an LLM prompt.
+        Each context block includes the chunk ID so the
+        model can identify which retrieved source supports
+        its answer.
         """
 
         documents = await self.retrieve(query)
@@ -162,12 +301,15 @@ class RAGRetriever:
             documents,
             start=1,
         ):
+            chunk_id = document["chunk_id"]
+            text = document["text"]
+
             context_parts.append(
-                f"Context {index}:\n\n"
-                f"{document['text']}"
+                f"[Source {index}]\n"
+                f"chunk_id: {chunk_id}\n"
+                f"content:\n{text}"
             )
 
         return "\n\n".join(context_parts)
-
 
 rag_retriever = RAGRetriever()

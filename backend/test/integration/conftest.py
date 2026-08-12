@@ -13,23 +13,39 @@ from app.services.rag.vector_store import vector_store
 )
 async def rag_services():
     """
-    Initialize all external services once for
-    the integration test session.
+    Initialize all external services required by
+    RAG evaluation tests.
+
+    Services:
+        - Redis
+        - Qdrant
+        - Ollama
     """
 
+    # --------------------------------------------------
     # Redis
+    # --------------------------------------------------
+
     await conversation_memory.connect()
 
+    # --------------------------------------------------
     # Qdrant
+    # --------------------------------------------------
+
     await vector_store.connect()
     await vector_store.initialize()
 
+    # --------------------------------------------------
     # Ollama
+    # --------------------------------------------------
+
     rag_pipeline.connect()
 
     yield
 
-    # Shutdown in reverse order
+    # --------------------------------------------------
+    # Shutdown
+    # --------------------------------------------------
 
     await rag_pipeline.close()
     await vector_store.close()
