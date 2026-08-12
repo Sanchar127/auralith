@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import json
@@ -15,22 +16,72 @@ class ConversationMemory:
     Stores the most recent messages for each conversation.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
+        self.redis: redis.Redis | None = None
+
+        self.max_messages = 20
+        self.ttl = 60 * 60 * 24
+
+    # ==========================================================
+    # Connection lifecycle
+    # ==========================================================
+
+    async def connect(self) -> None:
+        """Create and verify the Redis client."""
+
+        if self.redis is not None:
+            return
 
         self.redis = redis.from_url(
             settings.REDIS_URL,
             decode_responses=True,
         )
 
-        self.max_messages = 20
-        self.ttl = 60 * 60 * 24
+        await self.redis.ping()
+
+        logger.info(
+            "Connected to Redis at %s",
+            settings.REDIS_URL,
+        )
+
+    async def close(self) -> None:
+        """Close the Redis client."""
+
+        if self.redis is None:
+            return
+
+        await self.redis.aclose()
+
+        self.redis = None
+
+        logger.info(
+            "Redis client closed."
+        )
+
+    def _get_client(self) -> redis.Redis:
+        """Return the initialized Redis client."""
+
+        if self.redis is None:
+            raise RuntimeError(
+                "Redis client is not initialized. "
+                "Call connect() first."
+            )
+
+        return self.redis
+
+    # ==========================================================
+    # Key
+    # ==========================================================
 
     def _key(
         self,
         conversation_id: str,
     ) -> str:
-
         return f"chat:{conversation_id}"
+
+    # ==========================================================
+    # Save
+    # ==========================================================
 
     async def save(
         self,
@@ -39,6 +90,8 @@ class ConversationMemory:
         content: str,
     ) -> None:
 
+        client = self._get_client()
+
         key = self._key(conversation_id)
 
         message = {
@@ -46,15 +99,15 @@ class ConversationMemory:
             "content": content,
         }
 
-        await self.redis.rpush(
+        await client.rpush(
             key,
             json.dumps(message),
         )
 
-        while await self.redis.llen(key) > self.max_messages:
-            await self.redis.lpop(key)
+        while await client.llen(key) > self.max_messages:
+            await client.lpop(key)
 
-        await self.redis.expire(
+        await client.expire(
             key,
             self.ttl,
         )
@@ -64,14 +117,19 @@ class ConversationMemory:
             conversation_id,
         )
 
+    # ==========================================================
+    # Load
+    # ==========================================================
+
     async def load(
         self,
         conversation_id: str,
     ) -> list[dict]:
+        client = self._get_client()
 
         key = self._key(conversation_id)
 
-        items = await self.redis.lrange(
+        items = await client.lrange(
             key,
             0,
             -1,
@@ -82,12 +140,18 @@ class ConversationMemory:
             for item in items
         ]
 
+    # ==========================================================
+    # Clear
+    # ==========================================================
+
     async def clear(
         self,
         conversation_id: str,
     ) -> None:
 
-        await self.redis.delete(
+        client = self._get_client()
+
+        await client.delete(
             self._key(conversation_id)
         )
 
@@ -96,13 +160,17 @@ class ConversationMemory:
             conversation_id,
         )
 
+    # ==========================================================
     # Backward compatibility
+    # ==========================================================
+
     async def add_message(
         self,
         conversation_id: str,
         role: str,
         content: str,
     ) -> None:
+
         await self.save(
             conversation_id,
             role,
@@ -113,6 +181,7 @@ class ConversationMemory:
         self,
         conversation_id: str,
     ) -> list[dict]:
+
         return await self.load(
             conversation_id,
         )

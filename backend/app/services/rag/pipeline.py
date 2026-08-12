@@ -16,46 +16,86 @@ class RAGPipeline:
 
     Flow:
 
-    User Message
-        |
-        v
-    Conversation Memory
-        |
-        v
-    Qdrant Retriever
-        |
-        v
-    Prompt Builder
-        |
-        v
-    Ollama LLM
-        |
-        v
-    Save Conversation
+        User Message
+            |
+            v
+        Conversation Memory
+            |
+            v
+        Qdrant Retriever
+            |
+            v
+        Prompt Builder
+            |
+            v
+        Ollama LLM
+            |
+            v
+        Save Conversation
     """
 
     def __init__(self) -> None:
+        self.client: AsyncClient | None = None
+        self.model = settings.OLLAMA_MODEL
+
+    # ==========================================================
+    # Lifecycle
+    # ==========================================================
+
+    def connect(self) -> None:
+        """Create the Ollama client."""
+
+        if self.client is not None:
+            return
 
         self.client = AsyncClient(
             host=settings.OLLAMA_BASE_URL,
         )
 
-        self.model = settings.OLLAMA_MODEL
+        logger.info(
+            "Connected to Ollama at %s",
+            settings.OLLAMA_BASE_URL,
+        )
 
+    async def close(self) -> None:
+        """Close the Ollama client."""
+
+        if self.client is None:
+            return
+
+        # AsyncClient does not require an explicit close in
+        # every ollama-python version, so simply release it.
+        self.client = None
+
+        logger.info("Ollama client closed.")
+
+    def _get_client(self) -> AsyncClient:
+        """Return the initialized Ollama client."""
+
+        if self.client is None:
+            raise RuntimeError(
+                "Ollama client is not initialized. "
+                "Call connect() first."
+            )
+
+        return self.client
+
+    # ==========================================================
+    # RAG Pipeline
+    # ==========================================================
 
     async def run(
         self,
         conversation_id: str,
         message: str,
     ) -> str:
-        """
-        Execute RAG conversation pipeline.
-        """
+        """Execute the complete RAG conversation pipeline."""
 
         logger.info(
             "Starting RAG pipeline."
         )
 
+        client = self._get_client()
 
         # ----------------------------------------
         # Load conversation history
@@ -70,7 +110,6 @@ class RAGPipeline:
             len(history),
         )
 
-
         # ----------------------------------------
         # Retrieve knowledge from Qdrant
         # ----------------------------------------
@@ -84,7 +123,6 @@ class RAGPipeline:
             len(context),
         )
 
-
         # ----------------------------------------
         # Build Ollama messages
         # ----------------------------------------
@@ -95,37 +133,28 @@ class RAGPipeline:
             history=history,
         )
 
-
         logger.debug(
             "Prompt built with %s messages.",
             len(messages),
         )
-
 
         # ----------------------------------------
         # Generate response using Ollama
         # ----------------------------------------
 
         try:
-
-            response = await self.client.chat(
+            response = await client.chat(
                 model=self.model,
                 messages=messages,
             )
 
-
-            answer = (
-                response["message"]["content"]
-            )
-
+            answer = response["message"]["content"]
 
             logger.info(
                 "RAG response generated successfully."
             )
 
-
         except Exception as exc:
-
             logger.exception(
                 "RAG generation failed."
             )
@@ -133,8 +162,6 @@ class RAGPipeline:
             raise RuntimeError(
                 "Failed to generate response."
             ) from exc
-
-
 
         # ----------------------------------------
         # Save conversation memory
@@ -146,21 +173,17 @@ class RAGPipeline:
             content=message,
         )
 
-
         await conversation_memory.add_message(
             conversation_id=conversation_id,
             role="assistant",
             content=answer,
         )
 
-
         logger.debug(
             "Conversation saved."
         )
 
-
         return answer
-
 
 
 rag_pipeline = RAGPipeline()

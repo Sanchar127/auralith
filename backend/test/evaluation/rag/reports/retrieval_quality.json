@@ -1,0 +1,80 @@
+{
+  "total_queries": 3,
+  "recall_at_1": 0.8333333333333334,
+  "recall_at_3": 0.8333333333333334,
+  "recall_at_5": 1.0,
+  "recall_at_10": 1.0,
+  "mrr": 1.0,
+  "queries": [
+    {
+      "query": "How does audio enhancement work?",
+      "retrieved_ids": [
+        "chunk-123",
+        "chunk-123",
+        "chunk-123",
+        "chunk-456",
+        "chunk-456",
+        "chunk-456",
+        "0",
+        "0",
+        "0",
+        "0"
+      ],
+      "relevant_ids": [
+        "chunk-123",
+        "chunk-456"
+      ],
+      "recall_at_1": 0.5,
+      "recall_at_3": 0.5,
+      "recall_at_5": 1.0,
+      "recall_at_10": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "query": "How can I generate a song?",
+      "retrieved_ids": [
+        "chunk-789",
+        "chunk-789",
+        "chunk-789",
+        "chunk-456",
+        "chunk-456",
+        "chunk-456",
+        "chunk-111",
+        "chunk-111",
+        "chunk-111",
+        "chunk-123"
+      ],
+      "relevant_ids": [
+        "chunk-789"
+      ],
+      "recall_at_1": 1.0,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_10": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "query": "What audio formats are supported?",
+      "retrieved_ids": [
+        "chunk-111",
+        "chunk-111",
+        "chunk-111",
+        "chunk-456",
+        "chunk-456",
+        "chunk-456",
+        "chunk-123",
+        "chunk-123",
+        "chunk-123",
+        "0"
+      ],
+      "relevant_ids": [
+        "chunk-111"
+      ],
+      "recall_at_1": 1.0,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_10": 1.0,
+      "reciprocal_rank": 1.0
+    }
+  ]
+}

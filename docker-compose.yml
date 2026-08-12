@@ -10,10 +10,15 @@ services:
 
     restart: unless-stopped
 
+   
     env_file:
-      - .env
+    - .env
+
+    environment:
+      PYTHONPATH: /app/backend
 
     working_dir: /app/backend
+       
 
     ports:
       - "8000:8000"
@@ -276,9 +281,10 @@ services:
 
     ports:
       - "8001:8001"
-
+      - "50053:50053"
     volumes:
-      - ./services/deepfilternet/output:/app/output
+      - ./deepfilternet/output:/app/output
+      - ./deepfilternet/logs:/app/logs
 
     networks:
       - backend-network

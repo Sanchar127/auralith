@@ -9,11 +9,13 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 COPY backend/pyproject.toml backend/uv.lock ./
 
-RUN uv sync --frozen --no-dev --no-editable
+# Install application + development dependencies
+RUN uv sync --frozen --dev --no-editable
 
 COPY backend/ .
 
-# Runtime Stage
+
+# Runtime
 FROM python:3.12-slim-bookworm
 
 WORKDIR /app/backend

@@ -28,14 +28,14 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
 # Install Python dependencies
-COPY services/deepfilternet/requirements.txt .
+COPY deepfilternet/requirements.txt .
 
 RUN pip install --upgrade pip
 
 RUN pip install -r requirements.txt
 
 # Copy source
-COPY services/deepfilternet/ .
+COPY deepfilternet/ .
 
 # ============================================================
 # Stage 2 - Runtime

@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from typing import Any
@@ -7,6 +8,7 @@ from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import (
     Distance,
     PointStruct,
+    ScoredPoint,
     VectorParams,
 )
 
@@ -15,39 +17,77 @@ from app.core.logger import logger
 
 
 class VectorStore:
-    """
-    Qdrant vector database service.
-    """
+    """Qdrant vector database service."""
 
     def __init__(self) -> None:
+        self.client: AsyncQdrantClient | None = None
+
+        self.collection = settings.QDRANT_COLLECTION
+        self.vector_size = settings.QDRANT_VECTOR_SIZE
+
+    # ==========================================================
+    # Connection lifecycle
+    # ==========================================================
+
+    async def connect(self) -> None:
+        """Create the Qdrant client."""
+
+        if self.client is not None:
+            return
 
         self.client = AsyncQdrantClient(
             url=settings.QDRANT_URL,
         )
 
-        self.collection = settings.QDRANT_COLLECTION
+        logger.info(
+            "Connected to Qdrant at %s",
+            settings.QDRANT_URL,
+        )
 
-        self.vector_size = settings.QDRANT_VECTOR_SIZE
+    async def close(self) -> None:
+        """Close the Qdrant client."""
+
+        if self.client is None:
+            return
+
+        await self.client.close()
+
+        self.client = None
+
+        logger.info("Qdrant client closed.")
+
+    def _get_client(self) -> AsyncQdrantClient:
+        """Return the active Qdrant client."""
+
+        if self.client is None:
+            raise RuntimeError(
+                "Qdrant client is not initialized. "
+                "Call connect() first."
+            )
+
+        return self.client
+
+    # ==========================================================
+    # Collection management
+    # ==========================================================
 
     async def initialize(self) -> None:
-        """
-        Create the collection if it doesn't exist.
-        """
+        """Create the collection if it does not exist."""
 
-        collections = await self.client.get_collections()
+        client = self._get_client()
 
-        names = {
+        collections = await client.get_collections()
+
+        collection_names = {
             collection.name
             for collection in collections.collections
         }
 
-        if self.collection in names:
-
+        if self.collection in collection_names:
             logger.info(
                 "Qdrant collection '%s' already exists.",
                 self.collection,
             )
-
             return
 
         logger.info(
@@ -55,7 +95,7 @@ class VectorStore:
             self.collection,
         )
 
-        await self.client.create_collection(
+        await client.create_collection(
             collection_name=self.collection,
             vectors_config=VectorParams(
                 size=self.vector_size,
@@ -64,8 +104,13 @@ class VectorStore:
         )
 
         logger.info(
-            "Collection created successfully."
+            "Qdrant collection '%s' created successfully.",
+            self.collection,
         )
+
+    # ==========================================================
+    # Insert
+    # ==========================================================
 
     async def add(
         self,
@@ -73,9 +118,9 @@ class VectorStore:
         text: str,
         metadata: dict[str, Any] | None = None,
     ) -> str:
-        """
-        Insert one document.
-        """
+        """Insert one document into Qdrant."""
+
+        client = self._get_client()
 
         point_id = uuid4().hex
 
@@ -84,7 +129,7 @@ class VectorStore:
             **(metadata or {}),
         }
 
-        await self.client.upsert(
+        await client.upsert(
             collection_name=self.collection,
             points=[
                 PointStruct(
@@ -96,7 +141,7 @@ class VectorStore:
         )
 
         logger.debug(
-            "Inserted point %s",
+            "Inserted Qdrant point %s.",
             point_id,
         )
 
@@ -108,9 +153,19 @@ class VectorStore:
         texts: list[str],
         metadatas: list[dict[str, Any]],
     ) -> None:
-        """
-        Bulk insert multiple documents.
-        """
+        """Bulk insert multiple documents."""
+
+        client = self._get_client()
+
+        if not (
+            len(embeddings)
+            == len(texts)
+            == len(metadatas)
+        ):
+            raise ValueError(
+                "embeddings, texts, and metadatas "
+                "must have the same length."
+            )
 
         points = []
 
@@ -119,18 +174,23 @@ class VectorStore:
             texts,
             metadatas,
         ):
+            payload = {
+                "text": text,
+                **metadata,
+            }
+
             points.append(
                 PointStruct(
                     id=uuid4().hex,
                     vector=embedding,
-                    payload={
-                        "text": text,
-                        **metadata,
-                    },
+                    payload=payload,
                 )
             )
 
-        await self.client.upsert(
+        if not points:
+            return
+
+        await client.upsert(
             collection_name=self.collection,
             points=points,
         )
@@ -139,18 +199,25 @@ class VectorStore:
             "Inserted %d vectors.",
             len(points),
         )
+    # ==========================================================
+    # Search
+    # ==========================================================
 
     async def search(
         self,
         embedding: list[float],
         limit: int = 5,
-    ):
+    ) -> list[ScoredPoint]:
         """
-        Perform semantic search.
-        Compatible with qdrant-client 1.18.x.
+        Perform semantic similarity search.
+
+        Returns:
+            List of Qdrant scored points ordered by relevance.
         """
 
-        result = await self.client.query_points(
+        client = self._get_client()
+
+        result = await client.query_points(
             collection_name=self.collection,
             query=embedding,
             limit=limit,
@@ -159,23 +226,28 @@ class VectorStore:
 
         return result.points
 
+    # ==========================================================
+    # Delete
+    # ==========================================================
+
     async def delete(
         self,
         point_id: str,
     ) -> None:
-        """
-        Delete a vector by ID.
-        """
+        """Delete a vector by ID."""
 
-        await self.client.delete(
+        client = self._get_client()
+
+        await client.delete(
             collection_name=self.collection,
             points_selector=[point_id],
         )
 
         logger.info(
-            "Deleted point %s",
+            "Deleted Qdrant point %s.",
             point_id,
         )
 
 
 vector_store = VectorStore()
+
