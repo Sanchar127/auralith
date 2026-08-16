@@ -344,8 +344,7 @@ services:
     restart: unless-stopped
 
     env_file:
-      - path: ./subscription/.env
-    required: false
+      - .env
 
     environment:
       PYTHONPATH: "/app/subscription/generated:/app/subscription"
