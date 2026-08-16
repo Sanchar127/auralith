@@ -1,0 +1,466 @@
+services:
+  api:
+    image: auralith:latest
+
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+
+    container_name: ${API_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+   
+    env_file:
+    - ${AURALITH_ENV_FILE:-.env}
+
+    environment:
+      PYTHONPATH: /app/backend
+
+    working_dir: /app/backend
+       
+
+    ports:
+      - "8000:8000"
+      - "50051:50051"
+    volumes:
+      - .:/app
+      - ./contracts:/app/contracts
+
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      redis:
+        condition: service_healthy
+
+      rabbitmq:
+        condition: service_started
+
+      ollama:
+        condition: service_started
+
+      minio:
+        condition: service_healthy
+
+      minio-init:
+        condition: service_completed_successfully
+
+      qdrant:
+        condition: service_started
+
+    stdin_open: true
+    tty: true
+
+    networks:
+      - backend-network
+
+  celery:
+    image: auralith:latest
+
+    container_name: ${CELERY_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+    env_file:
+      - ${AURALITH_ENV_FILE:-.env}
+
+    working_dir: /app/backend
+
+    volumes:
+      - .:/app
+
+    command:
+      - celery
+      - -A
+      - app.workers.celery_app.celery
+      - worker
+      - --loglevel=info
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      redis:
+        condition: service_healthy
+
+      rabbitmq:
+        condition: service_started
+
+      ollama:
+        condition: service_started
+
+      minio:
+        condition: service_healthy
+
+      minio-init:
+        condition: service_completed_successfully
+
+      qdrant:
+        condition: service_started
+
+    stdin_open: true
+    tty: true
+
+    networks:
+      - backend-network
+  rabbitmq:
+    image: rabbitmq:3-management
+
+    container_name: ${RABBITMQ_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+
+    ports:
+      - "${RABBITMQ_PORT}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT}:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - backend-network
+
+  redis:
+    image: redis:7-alpine
+
+    container_name: ${REDIS_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+    command: redis-server --appendonly yes
+
+    ports:
+      - "${REDIS_PORT}:6379"
+
+    volumes:
+      - redis-data:/data
+
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - backend-network
+
+  postgres:
+      image: postgres:17-alpine
+
+      container_name: ${POSTGRES_CONTAINER_NAME}
+
+      restart: unless-stopped
+
+      env_file:
+        - ${AURALITH_ENV_FILE:-.env}
+
+      environment:
+        POSTGRES_DB: ${POSTGRES_DB}
+        POSTGRES_USER: ${POSTGRES_USER}
+        POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+      ports:
+        - "${POSTGRES_PORT}:5432"
+
+      volumes:
+        - postgres-data:/var/lib/postgresql/data
+
+      healthcheck:
+        test:
+          [
+            "CMD-SHELL",
+            "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
+          ]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+
+      networks:
+        - backend-network
+
+  # yue:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/yue.Dockerfile
+
+  #   container_name: ${YUE_CONTAINER_NAME}
+
+  #   restart: unless-stopped
+
+  #   env_file:
+  #     - ${AURALITH_ENV_FILE:-.env}
+
+  #   working_dir: /workspace
+
+  #   command: tail -f /dev/null
+
+  #   ports:
+  #     - "${YUE_PORT}:8001"
+
+  #   volumes:
+  #     - ./services/yue:/workspace
+  #     - yue-models:/workspace/models
+  #     - yue-cache:/root/.cache/huggingface
+
+  #   # NVIDIA GPU
+  #   runtime: nvidia
+
+  #   environment:
+  #     NVIDIA_VISIBLE_DEVICES: all
+  #     NVIDIA_DRIVER_CAPABILITIES: compute,utility
+
+  #   stdin_open: true
+  #   tty: true
+
+  #   networks:
+  #     - backend-network
+
+  ollama:
+    image: ollama/ollama:latest
+
+    container_name: ${OLLAMA_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+    ports:
+      - "${OLLAMA_PORT}:11434"
+
+    volumes:
+      - ollama-data:/root/.ollama
+
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+    networks:
+      - backend-network
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.4
+
+    container_name: ${QDRANT_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+    ports:
+      - "${QDRANT_PORT}:6333"
+
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+
+    networks:
+      - backend-network
+
+  deepfilternet:
+    build:
+      context: .
+      dockerfile: docker/deepf.Dockerfile
+
+    container_name: auralith-deepfilternet
+
+    restart: unless-stopped
+
+    ports:
+      - "8001:8001"
+      - "50053:50053"
+    volumes:
+      - ./deepfilternet/output:/app/output
+      - ./deepfilternet/logs:/app/logs
+
+    networks:
+      - backend-network
+
+
+
+  matchering:
+      build:
+        context: .
+        dockerfile: docker/matchering.Dockerfile
+
+      image: auralith-matchering:latest
+
+      container_name: auralith-matchering
+
+      restart: unless-stopped
+
+      ports:
+        - "8003:8003"
+
+      volumes:
+        - ./services/matchering:/app
+        - ./storage/matchering/input:/app/input
+        - ./storage/matchering/reference:/app/reference
+        - ./storage/matchering/output:/app/output
+        - ./storage/matchering/temp:/app/temp
+
+      healthcheck:
+        test:
+          [
+            "CMD",
+            "curl",
+            "-f",
+            "http://localhost:8003/health"
+          ]
+        interval: 30s
+        timeout: 10s
+        retries: 3
+        start_period: 20s
+
+      stdin_open: true
+      tty: true
+
+      networks:
+        - backend-network
+
+  
+  subscription:
+    container_name: auralith-subscription
+
+    build:
+      context: .
+      dockerfile: docker/subscription.Dockerfile
+
+    image: auralith-subscription:latest
+
+    restart: unless-stopped
+
+    env_file:
+      - ./subscription/.env
+
+    environment:
+      PYTHONPATH: "/app/subscription/generated:/app/subscription"
+
+    working_dir: /app/subscription
+
+    ports:
+      - "8002:8002"
+      - "50052:50052"
+  
+    volumes:
+      - .:/app
+      - ./contracts:/app/contracts
+    command:
+      - uvicorn
+      - main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8002"
+      - --reload
+    networks:
+      - backend-network
+
+  minio:
+    image: minio/minio:latest
+
+    container_name: ${MINIO_CONTAINER_NAME}
+
+    restart: unless-stopped
+
+    command: server /data --console-address ":9001"
+
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+
+    ports:
+      - "${MINIO_API_PORT}:9000"
+      - "${MINIO_CONSOLE_PORT}:9001"
+
+    volumes:
+      - minio-data:/data
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "http://localhost:9000/minio/health/live"
+        ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+    networks:
+      - backend-network
+
+  minio-init:
+    image: minio/mc:latest
+
+    container_name: auralith-minio-init
+
+    depends_on:
+      minio:
+        condition: service_healthy
+      
+
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      mc mb --ignore-existing local/${MINIO_BUCKET};
+      mc anonymous set none local/${MINIO_BUCKET};
+      echo 'MinIO bucket initialized.';
+      exit 0;
+      "
+
+    restart: "no"
+
+    networks:
+      - backend-network
+
+volumes:
+  postgres-data:
+    name: auralith_postgres_data
+
+  redis-data:
+    name: auralith_redis_data
+
+  ollama-data:
+    name: auralith_ollama_data
+
+  minio-data:
+    name: auralith_minio_data
+  
+  # yue-models:
+  #   name: auralith_yue_models
+
+  # yue-cache:
+  #   name: auralith_yue_cache
+  qdrant-data:
+    name: auralith_qdrant_data
+
+  matchering-input:
+    name: auralith_matchering_input
+
+  matchering-reference:
+    name: auralith_matchering_reference
+
+  matchering-output:
+    name: auralith_matchering_output
+
+  matchering-temp:
+    name: auralith_matchering_temp
+
+networks:
+  backend-network:
+    driver: bridge

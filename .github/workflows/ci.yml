@@ -1,0 +1,90 @@
+name: Auralith CI
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auralith-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Full CI
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 45
+
+    env:
+      APP_ENV: test
+      LOG_LEVEL: WARNING
+
+      POSTGRES_USER: auralith
+      POSTGRES_DB: auralith
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+
+      RABBITMQ_DEFAULT_USER: auralith
+      RABBITMQ_DEFAULT_PASS: ${{ secrets.RABBITMQ_DEFAULT_PASS }}
+
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
+      MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+
+    steps:
+      # ======================================================
+      # 1. Checkout
+      # ======================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ======================================================
+      # 2. Python
+      # ======================================================
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ======================================================
+      # 3. Install uv
+      # ======================================================
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      # ======================================================
+      # 4. Verify Docker
+      # ======================================================
+
+      - name: Verify Docker
+        run: |
+          docker --version
+          docker compose version
+
+      # ======================================================
+      # 5. Run complete Auralith CI
+      # ======================================================
+
+      - name: Run CI
+        run: |
+          chmod +x scripts/ci/*.sh
+          ./scripts/ci/ci.sh
