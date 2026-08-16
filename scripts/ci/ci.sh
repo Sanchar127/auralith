@@ -28,18 +28,19 @@ fail() {
 
 ENV_FILE="$ROOT_DIR/.env"
 
-if [[ ! -f "$ENV_FILE" ]]; then
-    fail ".env was not found."
+if [[ -f "$ENV_FILE" ]]; then
+    log "Loading environment from .env..."
+
+    set -a
+    source "$ENV_FILE"
+    set +a
+
+    pass "Environment loaded."
+else
+    log ".env not found; using CI environment variables."
 fi
 
-log "Loading environment from .env..."
-
-set -a
-source "$ENV_FILE"
-set +a
-
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-auralith-ci}"
-
 pass "Environment loaded."
 
 # ============================================================
