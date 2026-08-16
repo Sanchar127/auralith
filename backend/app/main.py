@@ -246,7 +246,7 @@ app.include_router(
 # Health Check
 # ==========================================
 
-@app.get("/")
+@app.get("/health")
 async def health():
     return {
         "service": settings.APP_NAME,
