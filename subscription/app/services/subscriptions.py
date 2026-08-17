@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
+from typing import Optional
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.model.subscriptions import SubscriptionPlan
 from app.db.model.token_wallet import TokenWallet
 from app.db.model.usersubscription import (
     SubscriptionStatus,
@@ -21,27 +22,23 @@ from app.exceptions import (
 
 class SubscriptionService:
     """
-    Subscription business logic.
+    Business logic for user subscriptions.
 
-    Responsible for:
-
-    - Creating subscriptions
-    - Getting active subscriptions
-    - Cancelling subscriptions
-    - Managing token wallets
-    - gRPC subscription validation
+    Responsibilities:
+    - Create subscriptions
+    - Retrieve active subscriptions
+    - Cancel subscriptions
+    - Manage token wallets
+    - Provide subscription status for gRPC
     """
 
-    def __init__(
-        self,
-        db: AsyncSession,
-    ) -> None:
+    def __init__(self, db: AsyncSession) -> None:
+        self.db = db
         self.repo = SubscriptionRepository(db)
-        self.db = db  # Add this line to access db directly
 
-    # ---------------------------------------------------------
-    # Queries
-    # ---------------------------------------------------------
+    # =========================================================
+    # QUERIES
+    # =========================================================
 
     async def get_active_subscription(
         self,
@@ -56,7 +53,7 @@ class SubscriptionService:
         user_id: uuid.UUID,
     ) -> tuple[bool, int]:
         """
-        Used by gRPC.
+        Used by the subscription gRPC service.
 
         Returns:
             (
@@ -65,8 +62,10 @@ class SubscriptionService:
             )
         """
 
-        subscription = await self.repo.get_active_subscription(
-            user_id
+        subscription = (
+            await self.repo.get_active_subscription(
+                user_id
+            )
         )
 
         if subscription is None:
@@ -84,35 +83,42 @@ class SubscriptionService:
             wallet.available_tokens,
         )
 
-    # ADD THIS NEW METHOD
     async def list_subscriptions(
         self,
         user_id: Optional[uuid.UUID] = None,
         status: Optional[SubscriptionStatus] = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> List[UserSubscription]:
+    ) -> list[UserSubscription]:
         """
-        List all subscriptions with optional filters.
-        Used by admin endpoints.
+        List subscriptions with optional filters.
         """
-        query = select(UserSubscription)
-        
-        # Apply filters
-        if user_id:
-            query = query.where(UserSubscription.user_id == user_id)
-        if status:
-            query = query.where(UserSubscription.status == status)
-        
-        # Apply pagination
-        query = query.offset(skip).limit(limit)
-        
-        result = await self.db.execute(query)
-        return result.scalars().all()
 
-    # ---------------------------------------------------------
-    # Commands
-    # ---------------------------------------------------------
+        query = select(UserSubscription)
+
+        if user_id is not None:
+            query = query.where(
+                UserSubscription.user_id == user_id
+            )
+
+        if status is not None:
+            query = query.where(
+                UserSubscription.status == status
+            )
+
+        query = (
+            query
+            .offset(skip)
+            .limit(limit)
+        )
+
+        result = await self.db.execute(query)
+
+        return list(result.scalars().all())
+
+    # =========================================================
+    # CREATE SUBSCRIPTION
+    # =========================================================
 
     async def create_subscription(
         self,
@@ -120,49 +126,98 @@ class SubscriptionService:
         price_id: uuid.UUID,
     ) -> UserSubscription:
 
-        existing = await self.repo.get_active_subscription(
-            user_id
+        # -----------------------------------------------------
+        # 1. Check existing subscription
+        # -----------------------------------------------------
+
+        existing = (
+            await self.repo.get_active_subscription(
+                user_id
+            )
         )
 
-        if existing:
+        if existing is not None:
             raise SubscriptionAlreadyActiveError(
                 "User already has an active subscription."
             )
 
-        price = await self.repo.get_price(
+        # -----------------------------------------------------
+        # 2. Load subscription plan
+        # -----------------------------------------------------
+
+        plan = await self.repo.get_price(
             price_id
         )
 
-        if price is None:
+        if plan is None:
             raise SubscriptionNotFoundError(
                 "Subscription plan not found."
             )
 
-        now = datetime.now(
-            timezone.utc
+        # -----------------------------------------------------
+        # 3. Validate plan
+        # -----------------------------------------------------
+
+        if not plan.is_active:
+            raise SubscriptionNotFoundError(
+                "Subscription plan is not active."
+            )
+
+        # -----------------------------------------------------
+        # 4. Validate duration
+        # -----------------------------------------------------
+
+        if plan.duration is None:
+            raise SubscriptionNotFoundError(
+                "Subscription plan has no duration configured."
+            )
+
+        if plan.duration.duration_months <= 0:
+            raise ValueError(
+                "Subscription duration must be greater than zero."
+            )
+
+        # -----------------------------------------------------
+        # 5. Calculate subscription dates
+        # -----------------------------------------------------
+
+        now = datetime.now(timezone.utc)
+
+        expires_at = self.calculate_expiry(
+            start=now,
+            duration_months=(
+                plan.duration.duration_months
+            ),
         )
 
+        # -----------------------------------------------------
+        # 6. Create subscription
+        # -----------------------------------------------------
+
         subscription = UserSubscription(
-            user_id=user_id,
-            plan_id=price.plan_id,
-            subscription_price_id=price.id,
-            status=SubscriptionStatus.ACTIVE,
-            starts_at=now,
-            expires_at=self.calculate_expiry(
-                now,
-                price.billing_interval,
-            ),
-            auto_renew=False,
-        )
+        user_id=user_id,
+        plan_id=plan.id,
+        status=SubscriptionStatus.ACTIVE,
+        starts_at=now,
+        expires_at=expires_at,
+    )
 
         await self.repo.create_subscription(
             subscription
         )
 
+        # -----------------------------------------------------
+        # 7. Create / update token wallet
+        # -----------------------------------------------------
+
         await self.create_wallet(
             user_id=user_id,
-            tokens=price.plan.monthly_token_quota,
+            tokens=plan.monthly_tokens,
         )
+
+        # -----------------------------------------------------
+        # 8. Commit transaction
+        # -----------------------------------------------------
 
         await self.repo.commit()
 
@@ -172,13 +227,19 @@ class SubscriptionService:
 
         return subscription
 
+    # =========================================================
+    # CANCEL
+    # =========================================================
+
     async def cancel_subscription(
         self,
         user_id: uuid.UUID,
     ) -> UserSubscription | None:
 
-        subscription = await self.repo.get_active_subscription(
-            user_id
+        subscription = (
+            await self.repo.get_active_subscription(
+                user_id
+            )
         )
 
         if subscription is None:
@@ -192,16 +253,27 @@ class SubscriptionService:
 
         return subscription
 
+    # =========================================================
+    # TOKEN MANAGEMENT
+    # =========================================================
+
     async def consume_tokens(
         self,
         user_id: uuid.UUID,
         amount: int,
     ) -> bool:
         """
-        Called after successful AI generation.
+        Consume tokens from user's wallet.
 
-        Returns False if insufficient tokens.
+        Returns False if:
+        - wallet doesn't exist
+        - insufficient tokens
         """
+
+        if amount <= 0:
+            raise ValueError(
+                "Token amount must be greater than zero."
+            )
 
         wallet = await self.repo.get_wallet(
             user_id
@@ -226,11 +298,17 @@ class SubscriptionService:
         amount: int,
     ) -> None:
 
+        if amount <= 0:
+            raise ValueError(
+                "Token amount must be greater than zero."
+            )
+
         wallet = await self.repo.get_wallet(
             user_id
         )
 
         if wallet is None:
+
             wallet = TokenWallet(
                 user_id=user_id,
                 available_tokens=amount,
@@ -242,6 +320,7 @@ class SubscriptionService:
             )
 
         else:
+
             wallet.available_tokens += amount
 
         await self.repo.commit()
@@ -252,11 +331,16 @@ class SubscriptionService:
         tokens: int,
     ) -> TokenWallet:
 
+        if tokens < 0:
+            raise ValueError(
+                "Token amount cannot be negative."
+            )
+
         wallet = await self.repo.get_wallet(
             user_id
         )
 
-        if wallet:
+        if wallet is not None:
 
             wallet.available_tokens += tokens
 
@@ -272,30 +356,54 @@ class SubscriptionService:
             wallet
         )
 
-    # ---------------------------------------------------------
-    # Helpers
-    # ---------------------------------------------------------
+    # =========================================================
+    # HELPERS
+    # =========================================================
 
     @staticmethod
     def calculate_expiry(
         start: datetime,
-        interval: str,
+        duration_months: int,
     ) -> datetime:
+        """
+        Calculate subscription expiry.
 
-        durations = {
-            "monthly": 30,
-            "3_month": 90,
-            "6_month": 180,
-            "yearly": 365,
-        }
+        Uses calendar month arithmetic rather than treating
+        every month as exactly 30 days.
+        """
 
-        days = durations.get(interval)
-
-        if days is None:
+        if duration_months <= 0:
             raise ValueError(
-                f"Invalid billing interval: {interval}"
+                "duration_months must be greater than zero."
             )
 
-        return start + timedelta(
-            days=days
+        month = (
+            start.month - 1
+            + duration_months
+        )
+
+        year = (
+            start.year
+            + month // 12
+        )
+
+        month = (
+            month % 12
+        ) + 1
+
+        # Handle dates such as Jan 31 -> Feb 28/29.
+        import calendar
+
+        day = min(
+            start.day,
+            calendar.monthrange(
+                year,
+                month,
+            )[1],
+        )
+
+        return start.replace(
+            year=year,
+            month=month,
+            day=day,
         )

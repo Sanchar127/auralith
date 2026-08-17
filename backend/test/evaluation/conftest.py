@@ -9,20 +9,37 @@ from app.services.rag.vector_store import vector_store
 
 @pytest_asyncio.fixture(
     scope="session",
-    autouse=True,
 )
 async def rag_services():
-    """Initialize RAG services for the evaluation session."""
+    """
+    Initialize the complete RAG service stack once
+    for the entire evaluation test session.
+
+    The services are global singletons, so they must
+    remain alive for all evaluation tests.
+    """
+
+    # ------------------------------------------------------
+    # Startup
+    # ------------------------------------------------------
 
     await conversation_memory.connect()
 
     await vector_store.connect()
     await vector_store.initialize()
 
-    rag_pipeline.connect()
+    await rag_pipeline.connect()
 
-    yield
+    try:
+        yield
 
-    await rag_pipeline.close()
-    await vector_store.close()
-    await conversation_memory.close()
+    finally:
+        # --------------------------------------------------
+        # Shutdown
+        # --------------------------------------------------
+
+        await rag_pipeline.close()
+
+        await vector_store.close()
+
+        await conversation_memory.close()

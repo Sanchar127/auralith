@@ -12,7 +12,6 @@ celery.conf.update(
     result_serializer="json",
 )
 
-# Automatically discover tasks in app.tasks
 celery.autodiscover_tasks(
     ["app.tasks"],
 )

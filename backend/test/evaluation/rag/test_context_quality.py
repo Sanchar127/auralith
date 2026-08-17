@@ -7,7 +7,6 @@ from typing import Any
 import pytest
 
 from app.services.rag.retriever import rag_retriever
-from app.services.rag.vector_store import vector_store
 
 
 # ==========================================================
@@ -17,31 +16,6 @@ from app.services.rag.vector_store import vector_store
 BASE_DIR = Path(__file__).resolve().parent
 
 DATASET_PATH = BASE_DIR / "dataset.json"
-
-
-# ==========================================================
-# Qdrant fixture
-# ==========================================================
-
-
-@pytest.fixture
-async def qdrant_connection():
-    """
-    Connect to the real Qdrant service.
-
-    This is an evaluation test, so we intentionally use
-    the real vector database instead of mocking it.
-    """
-
-    await vector_store.connect()
-
-    try:
-        await vector_store.initialize()
-
-        yield
-
-    finally:
-        await vector_store.close()
 
 
 # ==========================================================
@@ -77,7 +51,7 @@ def get_query(
     item: dict[str, Any],
 ) -> str:
     """
-    Extract the query from a dataset item.
+    Extract and validate the query.
     """
 
     query = item.get("query")
@@ -102,7 +76,11 @@ def get_relevant_chunk_ids(
     item: dict[str, Any],
 ) -> set[str]:
     """
-    Extract the expected relevant chunk IDs.
+    Extract expected relevant chunk IDs.
+
+    An empty list means the query is unsupported
+    and therefore cannot be evaluated for retrieval
+    quality.
     """
 
     chunk_ids = item.get(
@@ -118,7 +96,61 @@ def get_relevant_chunk_ids(
     return {
         str(chunk_id)
         for chunk_id in chunk_ids
+        if chunk_id is not None
     }
+
+
+def is_evaluable(
+    item: dict[str, Any],
+) -> bool:
+    """
+    Determine whether a dataset item can be evaluated
+    for retrieval quality.
+
+    Supported and partially supported queries should
+    contain relevant chunk IDs.
+
+    Unsupported queries have no relevant chunks and
+    are excluded from retrieval-quality metrics.
+    """
+
+    return bool(
+        get_relevant_chunk_ids(item)
+    )
+
+
+# ==========================================================
+# Retrieval helpers
+# ==========================================================
+
+
+def get_retrieved_chunk_ids(
+    documents: list[dict[str, Any]],
+) -> list[str]:
+    """
+    Extract chunk IDs from normalized retriever
+    documents.
+    """
+
+    return [
+        str(document["chunk_id"])
+        for document in documents
+        if document.get("chunk_id") is not None
+    ]
+
+
+def get_scores(
+    documents: list[dict[str, Any]],
+) -> list[float]:
+    """
+    Extract retrieval scores.
+    """
+
+    return [
+        float(document["score"])
+        for document in documents
+        if document.get("score") is not None
+    ]
 
 
 # ==========================================================
@@ -133,11 +165,11 @@ def calculate_context_precision(
     """
     Calculate context precision.
 
-    Precision:
-
         relevant retrieved chunks
         --------------------------
         all retrieved chunks
+
+    Returns 0.0 when nothing was retrieved.
     """
 
     if not retrieved_ids:
@@ -148,7 +180,10 @@ def calculate_context_precision(
         for chunk_id in retrieved_ids
     )
 
-    return relevant_count / len(retrieved_ids)
+    return (
+        relevant_count
+        / len(retrieved_ids)
+    )
 
 
 def calculate_context_recall(
@@ -158,15 +193,17 @@ def calculate_context_recall(
     """
     Calculate context recall.
 
-    Recall:
-
         relevant retrieved chunks
         --------------------------
-        all expected relevant chunks
+        expected relevant chunks
+
+    An empty relevant set is not a measurable
+    retrieval query and should be handled by the
+    caller before calculating this metric.
     """
 
     if not relevant_ids:
-        return 1.0
+        return 0.0
 
     retrieved_set = set(retrieved_ids)
 
@@ -184,10 +221,10 @@ def calculate_duplicate_ratio(
     retrieved_ids: list[str],
 ) -> float:
     """
-    Calculate the ratio of duplicate chunks.
+    Calculate duplicate ratio.
 
-    0.0 = no duplicates
-    1.0 = everything duplicated
+        0.0 = no duplicates
+        1.0 = all retrieved entries are duplicates
     """
 
     if not retrieved_ids:
@@ -200,8 +237,9 @@ def calculate_duplicate_ratio(
         - len(unique_ids)
     )
 
-    return duplicate_count / len(
-        retrieved_ids
+    return (
+        duplicate_count
+        / len(retrieved_ids)
     )
 
 
@@ -211,18 +249,14 @@ def calculate_context_relevance(
     """
     Calculate average retrieval relevance.
 
-    The retriever already provides a Qdrant similarity
-    score, so we use the average score as the deterministic
-    context relevance metric.
+    Qdrant similarity scores are used as the
+    deterministic retrieval relevance signal.
     """
 
-    if not documents:
-        return 0.0
+    scores = get_scores(documents)
 
-    scores = [
-        float(document["score"])
-        for document in documents
-    ]
+    if not scores:
+        return 0.0
 
     return sum(scores) / len(scores)
 
@@ -232,21 +266,21 @@ def calculate_context_ordering(
     relevant_ids: set[str],
 ) -> float:
     """
-    Measure whether relevant chunks appear near the top.
-
-    A score of:
+    Measure whether relevant chunks appear near
+    the beginning of the retrieval result.
 
         1.0 = relevant chunks appear at the top
-        0.0 = relevant chunks are at the bottom
+        0.0 = no relevant chunks retrieved
 
-    If no relevant chunks are retrieved, the score is 0.
+    Unsupported queries are not passed to this
+    function.
     """
 
     if not retrieved_ids:
         return 0.0
 
     if not relevant_ids:
-        return 1.0
+        return 0.0
 
     relevant_positions = [
         index
@@ -280,22 +314,21 @@ def calculate_context_ordering(
 
 
 # ==========================================================
-# Utility
+# Evaluation helper
 # ==========================================================
 
 
-def get_retrieved_chunk_ids(
-    documents: list[dict[str, Any]],
-) -> list[str]:
+async def retrieve_documents(
+    query: str,
+) -> list[dict[str, Any]]:
     """
-    Extract chunk IDs from normalized retriever
-    documents.
+    Execute retrieval through the application's
+    real RAG retriever.
     """
 
-    return [
-        str(document["chunk_id"])
-        for document in documents
-    ]
+    return await rag_retriever.retrieve(
+        query
+    )
 
 
 # ==========================================================
@@ -305,19 +338,17 @@ def get_retrieved_chunk_ids(
 
 @pytest.mark.asyncio
 async def test_context_quality(
-    qdrant_connection,
+    rag_services,
 ):
     """
-    Evaluate overall RAG context quality against
-    the golden dataset.
+    Evaluate overall RAG context quality.
 
-    Metrics:
+    Only queries containing relevant_chunk_ids
+    participate in retrieval-quality metrics.
 
-        - Context precision
-        - Context recall
-        - Context relevance
-        - Duplicate ratio
-        - Context ordering
+    Unsupported queries are skipped because there
+    are no expected chunks against which retrieval
+    quality can be measured.
     """
 
     dataset = load_dataset()
@@ -333,6 +364,7 @@ async def test_context_quality(
     ordering_scores: list[float] = []
 
     evaluated_cases = 0
+    skipped_cases = 0
 
     print()
     print("=" * 70)
@@ -346,15 +378,30 @@ async def test_context_quality(
             get_relevant_chunk_ids(item)
         )
 
-        assert relevant_ids, (
-            f"No relevant chunk IDs configured "
-            f"for query: {query!r}"
-        )
+        # --------------------------------------------------
+        # Unsupported query
+        # --------------------------------------------------
 
-        documents = (
-            await rag_retriever.retrieve(
-                query
+        if not relevant_ids:
+            skipped_cases += 1
+
+            print()
+            print(
+                f"Query: {query}"
             )
+            print(
+                "Status: SKIPPED "
+                "(no relevant_chunk_ids)"
+            )
+
+            continue
+
+        # --------------------------------------------------
+        # Retrieve
+        # --------------------------------------------------
+
+        documents = await retrieve_documents(
+            query
         )
 
         retrieved_ids = (
@@ -363,65 +410,126 @@ async def test_context_quality(
             )
         )
 
-        precision = calculate_context_precision(
-            retrieved_ids,
-            relevant_ids,
+        # --------------------------------------------------
+        # Calculate metrics
+        # --------------------------------------------------
+
+        precision = (
+            calculate_context_precision(
+                retrieved_ids,
+                relevant_ids,
+            )
         )
 
-        recall = calculate_context_recall(
-            retrieved_ids,
-            relevant_ids,
+        recall = (
+            calculate_context_recall(
+                retrieved_ids,
+                relevant_ids,
+            )
         )
 
-        relevance = calculate_context_relevance(
-            documents
+        relevance = (
+            calculate_context_relevance(
+                documents
+            )
         )
 
-        duplicates = calculate_duplicate_ratio(
-            retrieved_ids
+        duplicates = (
+            calculate_duplicate_ratio(
+                retrieved_ids
+            )
         )
 
-        ordering = calculate_context_ordering(
-            retrieved_ids,
-            relevant_ids,
+        ordering = (
+            calculate_context_ordering(
+                retrieved_ids,
+                relevant_ids,
+            )
         )
 
-        precision_scores.append(precision)
-        recall_scores.append(recall)
-        relevance_scores.append(relevance)
-        duplicate_scores.append(duplicates)
-        ordering_scores.append(ordering)
+        # --------------------------------------------------
+        # Store metrics
+        # --------------------------------------------------
+
+        precision_scores.append(
+            precision
+        )
+
+        recall_scores.append(
+            recall
+        )
+
+        relevance_scores.append(
+            relevance
+        )
+
+        duplicate_scores.append(
+            duplicates
+        )
+
+        ordering_scores.append(
+            ordering
+        )
 
         evaluated_cases += 1
 
+        # --------------------------------------------------
+        # Output
+        # --------------------------------------------------
+
         print()
-        print(f"Query: {query}")
         print(
-            f"Expected chunks: "
-            f"{sorted(relevant_ids)}"
-        )
-        print(
-            f"Retrieved chunks: "
-            f"{retrieved_ids}"
-        )
-        print(
-            f"Precision: {precision:.4f}"
-        )
-        print(
-            f"Recall: {recall:.4f}"
-        )
-        print(
-            f"Relevance: {relevance:.4f}"
-        )
-        print(
-            f"Duplicate ratio: "
-            f"{duplicates:.4f}"
-        )
-        print(
-            f"Ordering: {ordering:.4f}"
+            f"Query: {query}"
         )
 
-    assert evaluated_cases > 0
+        print(
+            "Expected chunks: "
+            f"{sorted(relevant_ids)}"
+        )
+
+        print(
+            "Retrieved chunks: "
+            f"{retrieved_ids}"
+        )
+
+        print(
+            f"Precision: "
+            f"{precision:.4f}"
+        )
+
+        print(
+            f"Recall: "
+            f"{recall:.4f}"
+        )
+
+        print(
+            f"Relevance: "
+            f"{relevance:.4f}"
+        )
+
+        print(
+            "Duplicate ratio: "
+            f"{duplicates:.4f}"
+        )
+
+        print(
+            f"Ordering: "
+            f"{ordering:.4f}"
+        )
+
+    # ------------------------------------------------------
+    # Dataset validation
+    # ------------------------------------------------------
+
+    assert evaluated_cases > 0, (
+        "No evaluable queries found in the "
+        "golden dataset. At least one query must "
+        "contain relevant_chunk_ids."
+    )
+
+    # ------------------------------------------------------
+    # Aggregate metrics
+    # ------------------------------------------------------
 
     average_precision = (
         sum(precision_scores)
@@ -448,31 +556,53 @@ async def test_context_quality(
         / len(ordering_scores)
     )
 
+    # ------------------------------------------------------
+    # Summary
+    # ------------------------------------------------------
+
     print()
     print("-" * 70)
+
     print(
-        f"Evaluated cases:    {evaluated_cases}"
+        f"Total dataset queries: "
+        f"{len(dataset)}"
     )
+
     print(
-        f"Context precision:  "
+        f"Evaluated queries:     "
+        f"{evaluated_cases}"
+    )
+
+    print(
+        f"Skipped queries:       "
+        f"{skipped_cases}"
+    )
+
+    print(
+        f"Context precision:     "
         f"{average_precision:.4f}"
     )
+
     print(
-        f"Context recall:     "
+        f"Context recall:        "
         f"{average_recall:.4f}"
     )
+
     print(
-        f"Context relevance:  "
+        f"Context relevance:     "
         f"{average_relevance:.4f}"
     )
+
     print(
-        f"Duplicate ratio:    "
+        f"Duplicate ratio:       "
         f"{average_duplicates:.4f}"
     )
+
     print(
-        f"Context ordering:   "
+        f"Context ordering:      "
         f"{average_ordering:.4f}"
     )
+
     print("=" * 70)
 
     # ------------------------------------------------------
@@ -507,18 +637,24 @@ async def test_context_quality(
 
 @pytest.mark.asyncio
 async def test_context_contains_relevant_chunks(
-    qdrant_connection,
+    rag_services,
 ):
     """
-    Verify every golden query retrieves at least
-    one expected relevant chunk.
+    Verify every evaluable golden query retrieves
+    at least one expected relevant chunk.
+
+    Unsupported queries are skipped because they
+    intentionally have no relevant_chunk_ids.
     """
 
     dataset = load_dataset()
 
-    assert dataset
+    assert dataset, (
+        "Golden dataset is empty."
+    )
 
     evaluated = 0
+    skipped = 0
 
     for item in dataset:
         query = get_query(item)
@@ -527,12 +663,20 @@ async def test_context_contains_relevant_chunks(
             get_relevant_chunk_ids(item)
         )
 
-        assert relevant_ids
+        # --------------------------------------------------
+        # Unsupported query
+        # --------------------------------------------------
 
-        documents = (
-            await rag_retriever.retrieve(
-                query
-            )
+        if not relevant_ids:
+            skipped += 1
+            continue
+
+        # --------------------------------------------------
+        # Retrieve
+        # --------------------------------------------------
+
+        documents = await retrieve_documents(
+            query
         )
 
         retrieved_ids = set(
@@ -554,7 +698,17 @@ async def test_context_contains_relevant_chunks(
 
         evaluated += 1
 
-    assert evaluated > 0
+    assert evaluated > 0, (
+        "No evaluable queries found."
+    )
+
+    print()
+    print(
+        f"Evaluated queries: {evaluated}"
+    )
+    print(
+        f"Skipped unsupported queries: {skipped}"
+    )
 
 
 # ==========================================================
@@ -564,26 +718,29 @@ async def test_context_contains_relevant_chunks(
 
 @pytest.mark.asyncio
 async def test_retrieval_does_not_return_duplicate_chunks(
-    qdrant_connection,
+    rag_services,
 ):
     """
     Verify retrieval does not return the same
     chunk multiple times.
+
+    This property can be checked for both supported
+    and unsupported queries.
     """
 
     dataset = load_dataset()
 
-    assert dataset
+    assert dataset, (
+        "Golden dataset is empty."
+    )
 
     evaluated = 0
 
     for item in dataset:
         query = get_query(item)
 
-        documents = (
-            await rag_retriever.retrieve(
-                query
-            )
+        documents = await retrieve_documents(
+            query
         )
 
         chunk_ids = (
@@ -612,32 +769,34 @@ async def test_retrieval_does_not_return_duplicate_chunks(
 
 @pytest.mark.asyncio
 async def test_retrieval_results_are_ordered_by_score(
-    qdrant_connection,
+    rag_services,
 ):
     """
-    Verify Qdrant retrieval results are ordered
-    from highest similarity score to lowest.
+    Verify retrieval results are ordered from
+    highest similarity score to lowest similarity score.
+
+    This property can be checked for both supported
+    and unsupported queries.
     """
 
     dataset = load_dataset()
 
-    assert dataset
+    assert dataset, (
+        "Golden dataset is empty."
+    )
 
     evaluated = 0
 
     for item in dataset:
         query = get_query(item)
 
-        documents = (
-            await rag_retriever.retrieve(
-                query
-            )
+        documents = await retrieve_documents(
+            query
         )
 
-        scores = [
-            float(document["score"])
-            for document in documents
-        ]
+        scores = get_scores(
+            documents
+        )
 
         assert scores == sorted(
             scores,

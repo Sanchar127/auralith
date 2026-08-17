@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import uuid
@@ -21,7 +20,7 @@ from app.services.token.token_counter import token_counter
 from app.services.token.token_usage import TokenUsage
 from app.storage.minio import minio_storage
 from app.storage.validators import validate_audio_file
-from app.tasks.audio import enhance_audio
+from app.workers.celery_app import celery
 
 
 class ChatService:
@@ -29,27 +28,18 @@ class ChatService:
     Application service responsible for chat orchestration.
 
     Responsibilities:
-    - Create conversations
-    - Validate conversation ownership
-    - Handle audio enhancement jobs
-    - Reserve subscription tokens
-    - Execute RAG / LLM pipeline
-    - Calculate actual token usage
-    - Settle token usage
-    - Return chat responses
-
-    Conversation ownership:
-    - Conversations belong to a user.
-    - If conversation_id is None, a new UUID is generated.
-    - If conversation_id is provided, it must belong to the
-      authenticated user.
+    - Create and validate conversations.
+    - Handle audio uploads.
+    - Create audio enhancement jobs.
+    - Queue DeepFilterNet Celery tasks.
+    - Execute RAG / LLM requests.
+    - Reserve and settle subscription tokens.
     """
 
     def __init__(
         self,
         subscription_client: SubscriptionClient | None = None,
     ) -> None:
-
         self.subscription_client = (
             subscription_client
             or SubscriptionClient()
@@ -69,12 +59,14 @@ class ChatService:
     ) -> UUID:
         """
         Return an existing conversation owned by the user,
-        or create a new conversation when conversation_id is None.
+        or create a new conversation.
         """
 
         try:
             user_uuid = UUID(user_id)
+
         except (ValueError, TypeError) as exc:
+
             raise HTTPException(
                 status_code=400,
                 detail="Invalid user ID",
@@ -82,9 +74,9 @@ class ChatService:
 
         async with AsyncSessionLocal() as db:
 
-            # =====================================================
-            # NEW CONVERSATION
-            # =====================================================
+            # -------------------------------------------------
+            # CREATE NEW CONVERSATION
+            # -------------------------------------------------
 
             if conversation_id is None:
 
@@ -108,9 +100,9 @@ class ChatService:
 
                 return new_conversation_id
 
-            # =====================================================
-            # EXISTING CONVERSATION
-            # =====================================================
+            # -------------------------------------------------
+            # LOAD EXISTING CONVERSATION
+            # -------------------------------------------------
 
             result = await db.execute(
                 select(Conversation).where(
@@ -136,6 +128,7 @@ class ChatService:
                 )
 
             return conversation.id
+
     # =========================================================
     # MAIN CHAT
     # =========================================================
@@ -152,16 +145,35 @@ class ChatService:
         """
         Main chat entry point.
 
-        Flow:
+        Audio flow:
 
-        1. Validate request
-        2. Get or create conversation
-        3. Handle audio if uploaded
-        4. Reserve tokens
-        5. Run RAG / LLM
-        6. Calculate token usage
-        7. Settle tokens
-        8. Return response
+            Upload
+               ↓
+            MinIO
+               ↓
+            AudioJob PostgreSQL
+               ↓
+            Build DeepFilterNet payload
+               ↓
+            Celery / RabbitMQ
+               ↓
+            DeepFilterNet
+               ↓
+            MinIO
+
+        Normal chat flow:
+
+            Message
+               ↓
+            Reserve tokens
+               ↓
+            RAG / LLM
+               ↓
+            Calculate usage
+               ↓
+            Settle tokens
+               ↓
+            Response
         """
 
         # =====================================================
@@ -219,201 +231,281 @@ class ChatService:
 
         if file is not None:
 
-            # -------------------------------------------------
-            # Validate audio
-            # -------------------------------------------------
-
-            await validate_audio_file(file)
-
-            logger.info(
-                "Audio validation successful "
-                "user_id=%s conversation_id=%s "
-                "request_id=%s filename=%s",
-                user_id,
-                conversation_id,
-                request_id,
-                file.filename,
+            return await self._handle_audio(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                file=file,
+                request_id=request_id,
             )
-
-            # -------------------------------------------------
-            # Upload original audio to MinIO
-            # -------------------------------------------------
-
-            try:
-
-                file_metadata = (
-                    await minio_storage.upload_chat_file(
-                        file=file,
-                        user_id=user_id,
-                        conversation_id=str(conversation_id),
-                    )
-                )
-
-            except Exception as exc:
-
-                logger.exception(
-                    "Failed to upload audio "
-                    "user_id=%s conversation_id=%s "
-                    "request_id=%s",
-                    user_id,
-                    conversation_id,
-                    request_id,
-                )
-
-                raise HTTPException(
-                    status_code=503,
-                    detail="Failed to upload audio",
-                ) from exc
-
-            input_object_key = file_metadata["object_name"]
-
-            logger.info(
-                "Audio uploaded to MinIO "
-                "user_id=%s conversation_id=%s "
-                "request_id=%s object=%s",
-                user_id,
-                conversation_id,
-                request_id,
-                input_object_key,
-            )
-
-            # -------------------------------------------------
-            # Create audio job
-            # -------------------------------------------------
-
-            async with AsyncSessionLocal() as db:
-
-                try:
-
-                    job = (
-                        await self.audio_job_service
-                        .create_enhancement_job(
-                            db=db,
-                            user_id=user_id,
-                            conversation_id=conversation_id,
-                            input_object_key=input_object_key,
-                        )
-                    )
-
-                    await db.commit()
-
-                except Exception as exc:
-
-                    await db.rollback()
-
-                    logger.exception(
-                        "Failed to create audio job "
-                        "user_id=%s conversation_id=%s",
-                        user_id,
-                        conversation_id,
-                    )
-
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Failed to create audio job",
-                    ) from exc
-
-                logger.info(
-                    "Audio enhancement job created "
-                    "job_id=%s input=%s output=%s",
-                    job.id,
-                    job.input_object_key,
-                    job.output_object_key,
-                )
-
-                # -------------------------------------------------
-                # Queue Celery task
-                # -------------------------------------------------
-
-                try:
-
-                    task = enhance_audio.delay(
-                        str(job.id)
-                    )
-
-                except Exception as exc:
-
-                    logger.exception(
-                        "Failed to queue audio enhancement "
-                        "job_id=%s",
-                        job.id,
-                    )
-
-                    try:
-                        from app.models.audio_job import (
-                            AudioJobStatus,
-                        )
-
-                        job.status = (
-                            AudioJobStatus.FAILED
-                        )
-
-                        job.error = (
-                            "Failed to queue Celery task: "
-                            f"{exc}"
-                        )
-
-                        await db.commit()
-
-                    except Exception:
-
-                        await db.rollback()
-
-                    raise HTTPException(
-                        status_code=503,
-                        detail=(
-                            "Audio processing service "
-                            "temporarily unavailable"
-                        ),
-                    ) from exc
-
-                # -------------------------------------------------
-                # Store Celery task ID
-                # -------------------------------------------------
-
-                job.celery_task_id = task.id
-
-                await db.commit()
-
-                logger.info(
-                    "Audio enhancement task queued "
-                    "job_id=%s celery_task_id=%s",
-                    job.id,
-                    task.id,
-                )
-
-                job_id = str(job.id)
-
-            # -------------------------------------------------
-            # Return immediately
-            # -------------------------------------------------
-
-            return ChatResponse(
-            success=True,
-            type="enhance",
-            conversation_id=str(conversation_id),
-            task_id=str(job.id),
-            status="queued",
-            message="Audio enhancement started",
-        )
 
         # =====================================================
         # 3. NORMAL LLM CHAT
         # =====================================================
 
+        return await self._handle_chat(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message=message,
+            request_id=request_id,
+        )
+
+    # =========================================================
+    # AUDIO
+    # =========================================================
+
+    async def _handle_audio(
+        self,
+        *,
+        user_id: str,
+        conversation_id: UUID,
+        file: UploadFile,
+        request_id: str,
+    ) -> ChatResponse:
+        """
+        Handle audio upload and queue DeepFilterNet.
+
+        The complete job payload is sent to Celery so the
+        DeepFilterNet service does not need access to the
+        Auralith PostgreSQL database.
+        """
+
+        # =====================================================
+        # VALIDATE AUDIO
+        # =====================================================
+
+        await validate_audio_file(file)
+
+        logger.info(
+            "Audio validation successful "
+            "user_id=%s conversation_id=%s "
+            "request_id=%s filename=%s",
+            user_id,
+            conversation_id,
+            request_id,
+            file.filename,
+        )
+
+        # =====================================================
+        # UPLOAD ORIGINAL AUDIO TO MINIO
+        # =====================================================
+
+        try:
+
+            file_metadata = (
+                await minio_storage.upload_chat_file(
+                    file=file,
+                    user_id=user_id,
+                    conversation_id=str(conversation_id),
+                )
+            )
+
+        except Exception as exc:
+
+            logger.exception(
+                "Failed to upload audio "
+                "user_id=%s conversation_id=%s "
+                "request_id=%s",
+                user_id,
+                conversation_id,
+                request_id,
+            )
+
+            raise HTTPException(
+                status_code=503,
+                detail="Failed to upload audio",
+            ) from exc
+
+        input_object_key = file_metadata["object_name"]
+
+        logger.info(
+            "Audio uploaded to MinIO "
+            "user_id=%s conversation_id=%s "
+            "request_id=%s object=%s",
+            user_id,
+            conversation_id,
+            request_id,
+            input_object_key,
+        )
+
+        # =====================================================
+        # CREATE AUDIO JOB
+        # =====================================================
+
+        async with AsyncSessionLocal() as db:
+
+            try:
+
+                job = (
+                    await self.audio_job_service
+                    .create_enhancement_job(
+                        db=db,
+                        user_id=user_id,
+                        conversation_id=conversation_id,
+                        input_object_key=input_object_key,
+                    )
+                )
+
+                await db.commit()
+
+            except Exception as exc:
+
+                await db.rollback()
+
+                logger.exception(
+                    "Failed to create audio job "
+                    "user_id=%s conversation_id=%s",
+                    user_id,
+                    conversation_id,
+                )
+
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to create audio job",
+                ) from exc
+
+            logger.info(
+                "Audio enhancement job created "
+                "job_id=%s input=%s output=%s",
+                job.id,
+                job.input_object_key,
+                job.output_object_key,
+            )
+
+            # =================================================
+            # BUILD DEEPFILTERNET PAYLOAD
+            # =================================================
+
+            deepfilter_payload = {
+                "job_id": str(job.id),
+
+                "input_bucket": settings.MINIO_BUCKET,
+                "input_object_key": job.input_object_key,
+
+                "output_bucket": settings.MINIO_BUCKET,
+                "output_object_key": job.output_object_key,
+
+                "noise_reduction": True,
+                "dereverberation": False,
+                "gain_normalization": True,
+
+                "sample_rate": 0,
+                "channels": 0,
+
+                "output_format": "wav",
+
+                "bitrate": 0,
+
+                "metadata": {},
+            }
+
+            logger.info(
+                "DeepFilterNet payload prepared "
+                "job_id=%s input=%s output=%s",
+                job.id,
+                job.input_object_key,
+                job.output_object_key,
+            )
+
+            # =================================================
+            # QUEUE CELERY TASK
+            # =================================================
+
+            try:
+
+                task = celery.send_task(
+                    "deepfilternet.enhance_audio",
+                    args=[deepfilter_payload],
+                    queue="deepfilter",
+                )
+
+            except Exception as exc:
+
+                logger.exception(
+                    "Failed to queue audio enhancement "
+                    "job_id=%s",
+                    job.id,
+                )
+
+                try:
+
+                    from app.models.audio_job import (
+                        AudioJobStatus,
+                    )
+
+                    job.status = AudioJobStatus.FAILED
+
+                    job.error = (
+                        "Failed to queue Celery task: "
+                        f"{exc}"
+                    )
+
+                    await db.commit()
+
+                except Exception:
+
+                    await db.rollback()
+
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "Audio processing service "
+                        "temporarily unavailable"
+                    ),
+                ) from exc
+
+            # =================================================
+            # STORE CELERY TASK ID
+            # =================================================
+
+            job.celery_task_id = task.id
+
+            await db.commit()
+
+            logger.info(
+                "Audio enhancement task queued "
+                "job_id=%s celery_task_id=%s",
+                job.id,
+                task.id,
+            )
+
+            # =================================================
+            # RETURN
+            # =================================================
+
+            return ChatResponse(
+                success=True,
+                type="enhance",
+                conversation_id=str(conversation_id),
+                task_id=str(job.id),
+                status="queued",
+                message="Audio enhancement started",
+            )
+
+    # =========================================================
+    # NORMAL CHAT
+    # =========================================================
+
+    async def _handle_chat(
+        self,
+        *,
+        user_id: str,
+        conversation_id: UUID,
+        message: str,
+        request_id: str,
+    ) -> ChatResponse:
+        """
+        Execute the normal RAG / LLM pipeline.
+        """
+
         model = settings.OLLAMA_MODEL
 
-        # -----------------------------------------------------
-        # Estimate input tokens
-        # -----------------------------------------------------
+        # =====================================================
+        # ESTIMATE INPUT TOKENS
+        # =====================================================
 
         estimated_input_tokens = (
             token_counter.count(message)
         )
-
-        # -----------------------------------------------------
-        # Reserve output capacity
-        # -----------------------------------------------------
 
         max_output_tokens = 4096
 
@@ -433,7 +525,7 @@ class ChatService:
         )
 
         # =====================================================
-        # 4. RESERVE TOKENS
+        # RESERVE TOKENS
         # =====================================================
 
         try:
@@ -488,7 +580,7 @@ class ChatService:
             ) from exc
 
         # =====================================================
-        # 5. VALIDATE RESERVATION
+        # VALIDATE RESERVATION
         # =====================================================
 
         if not reservation.success:
@@ -522,7 +614,7 @@ class ChatService:
         )
 
         # =====================================================
-        # 6. RUN RAG / LLM
+        # RUN RAG / LLM
         # =====================================================
 
         try:
@@ -544,34 +636,18 @@ class ChatService:
                 reservation_id,
             )
 
-            # IMPORTANT:
-            # If your subscription service has a
-            # release/cancel reservation RPC, call it here.
-            #
-            # Example:
-            #
-            # await self.subscription_client.release_tokens(
-            #     user_id=user_id,
-            #     reservation_id=reservation_id,
-            #     request_id=request_id,
-            # )
-
             raise HTTPException(
                 status_code=500,
                 detail="AI generation failed",
             ) from exc
 
         # =====================================================
-        # 7. CALCULATE ACTUAL TOKEN USAGE
+        # CALCULATE TOKEN USAGE
         # =====================================================
 
-        input_tokens = token_counter.count(
-            message
-        )
+        input_tokens = token_counter.count(message)
 
-        output_tokens = token_counter.count(
-            response
-        )
+        output_tokens = token_counter.count(response)
 
         usage = TokenUsage(
             input_tokens=input_tokens,
@@ -590,7 +666,7 @@ class ChatService:
         )
 
         # =====================================================
-        # 8. SETTLE TOKENS
+        # SETTLE TOKENS
         # =====================================================
 
         try:
@@ -650,7 +726,7 @@ class ChatService:
             ) from exc
 
         # =====================================================
-        # 9. VALIDATE SETTLEMENT
+        # VALIDATE SETTLEMENT
         # =====================================================
 
         if not settlement.success:
@@ -672,7 +748,7 @@ class ChatService:
             )
 
         # =====================================================
-        # 10. RETURN CHAT RESPONSE
+        # RETURN
         # =====================================================
 
         logger.info(
@@ -705,8 +781,8 @@ class ChatService:
         Return Celery task status.
 
         NOTE:
-        For production, task ownership should also be checked
-        against the AudioJob table using user_id.
+        Since DeepFilterNet uses task_ignore_result=True,
+        AsyncResult.result will normally not contain a result.
         """
 
         if not task_id:
@@ -718,16 +794,14 @@ class ChatService:
 
         task = AsyncResult(task_id)
 
-        result = (
-            task.result
-            if task.ready()
-            else None
-        )
-
         return {
             "task_id": task.id,
             "status": task.status,
-            "result": result,
+            "result": (
+                task.result
+                if task.ready()
+                else None
+            ),
         }
 
     # =========================================================
@@ -747,4 +821,3 @@ class ChatService:
 # =============================================================
 
 chat_service = ChatService()
-

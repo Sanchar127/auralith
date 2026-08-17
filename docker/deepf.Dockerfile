@@ -1,64 +1,113 @@
 # ============================================================
-# Stage 1 - Builder
+# Stage 1: Builder
 # ============================================================
+
 FROM python:3.12-slim AS builder
 
-ENV PYTHONUNBUFFERED=1
-ENV PIP_NO_CACHE_DIR=1
-ENV PATH="/root/.cargo/bin:${PATH}"
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PATH="/opt/venv/bin:/root/.cargo/bin:$PATH"
 
 WORKDIR /build
 
-# System dependencies
-RUN apt-get update && apt-get install -y \
+# ------------------------------------------------------------
+# Build dependencies
+# ------------------------------------------------------------
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     pkg-config \
     curl \
     git \
-    ffmpeg \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
+# ------------------------------------------------------------
 # Install Rust
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+# ------------------------------------------------------------
 
-# Create virtual environment
+RUN curl --proto '=https' \
+    --tlsv1.2 \
+    -sSf https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal
+
+# ------------------------------------------------------------
+# Python virtual environment
+# ------------------------------------------------------------
+
 RUN python -m venv /opt/venv
 
-ENV PATH="/opt/venv/bin:${PATH}"
+ENV PATH="/opt/venv/bin:/root/.cargo/bin:$PATH"
 
-# Install Python dependencies
-COPY deepfilternet/requirements.txt .
+# ------------------------------------------------------------
+# Python dependencies
+# ------------------------------------------------------------
 
-RUN pip install --upgrade pip
+COPY deepfilternet/requirements.txt /tmp/requirements.txt
 
-RUN pip install -r requirements.txt
+RUN pip install --upgrade pip setuptools wheel
 
-# Copy source
-COPY deepfilternet/ .
+RUN pip install -r /tmp/requirements.txt
+
+# ------------------------------------------------------------
+# Application source
+# ------------------------------------------------------------
+
+COPY deepfilternet /app
+
 
 # ============================================================
-# Stage 2 - Runtime
+# Stage 2: Runtime
 # ============================================================
+
 FROM python:3.12-slim
 
-ENV PYTHONUNBUFFERED=1
-ENV PATH="/opt/venv/bin:${PATH}"
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 
-# Runtime libraries only
-RUN apt-get update && apt-get install -y \
+# ------------------------------------------------------------
+# Runtime dependencies
+# ------------------------------------------------------------
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
+    git \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy virtual environment
+# ------------------------------------------------------------
+# Copy Python environment from builder
+# ------------------------------------------------------------
+
 COPY --from=builder /opt/venv /opt/venv
 
+# ------------------------------------------------------------
 # Copy application
-COPY --from=builder /build /app
+# ------------------------------------------------------------
+
+COPY --from=builder /app /app
+
+# ------------------------------------------------------------
+# Runtime directories
+# ------------------------------------------------------------
+
+RUN mkdir -p \
+    /app/output \
+    /app/logs
+
+# ------------------------------------------------------------
+# Ports
+# ------------------------------------------------------------
 
 EXPOSE 8001
+EXPOSE 50053
+
+# ------------------------------------------------------------
+# Default command
+# ------------------------------------------------------------
 
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]

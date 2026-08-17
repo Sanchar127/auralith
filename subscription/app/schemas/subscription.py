@@ -4,45 +4,57 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
+# =========================================================
+# CREATE SUBSCRIPTION
+# =========================================================
+
+
 class SubscribeRequest(BaseModel):
     """
     Request body for creating a subscription.
 
-    user_id comes from JWT token.
+    The authenticated user's ID comes from the JWT.
     """
 
     price_id: UUID
 
 
+# =========================================================
+# UPDATE SUBSCRIPTION
+# =========================================================
+
 
 class SubscriptionUpdate(BaseModel):
     """
     Fields that can be updated on a subscription.
+
+    Only fields that actually exist on UserSubscription
+    should be exposed here.
     """
 
-    auto_renew: bool | None = None
     status: str | None = None
     expires_at: datetime | None = None
 
 
+# =========================================================
+# SUBSCRIPTION RESPONSE
+# =========================================================
+
 
 class SubscriptionResponse(BaseModel):
+    """
+    API response representing a user subscription.
+    """
 
     id: UUID
 
-
     plan_id: UUID
-
-    subscription_price_id: UUID
 
     status: str
 
     starts_at: datetime
 
     expires_at: datetime
-
-    auto_renew: bool
-
 
     model_config = ConfigDict(
         from_attributes=True,

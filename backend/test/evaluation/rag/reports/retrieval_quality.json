@@ -1,31 +1,25 @@
 {
-  "total_queries": 3,
-  "recall_at_1": 0.8333333333333334,
-  "recall_at_3": 0.8333333333333334,
-  "recall_at_5": 1.0,
-  "recall_at_10": 1.0,
-  "mrr": 1.0,
+  "total_queries": 6,
+  "recall_at_1": 0.5,
+  "recall_at_3": 0.6666666666666666,
+  "recall_at_5": 0.6666666666666666,
+  "recall_at_10": 0.6666666666666666,
+  "mrr": 0.6666666666666666,
   "queries": [
     {
       "query": "How does audio enhancement work?",
       "retrieved_ids": [
         "chunk-123",
-        "chunk-123",
-        "chunk-123",
         "chunk-456",
-        "chunk-456",
-        "chunk-456",
-        "0",
-        "0",
-        "0",
-        "0"
+        "chunk-111",
+        "chunk-789"
       ],
       "relevant_ids": [
         "chunk-123",
         "chunk-456"
       ],
       "recall_at_1": 0.5,
-      "recall_at_3": 0.5,
+      "recall_at_3": 1.0,
       "recall_at_5": 1.0,
       "recall_at_10": 1.0,
       "reciprocal_rank": 1.0
@@ -34,13 +28,7 @@
       "query": "How can I generate a song?",
       "retrieved_ids": [
         "chunk-789",
-        "chunk-789",
-        "chunk-789",
         "chunk-456",
-        "chunk-456",
-        "chunk-456",
-        "chunk-111",
-        "chunk-111",
         "chunk-111",
         "chunk-123"
       ],
@@ -57,20 +45,62 @@
       "query": "What audio formats are supported?",
       "retrieved_ids": [
         "chunk-111",
-        "chunk-111",
-        "chunk-111",
-        "chunk-456",
-        "chunk-456",
         "chunk-456",
         "chunk-123",
-        "chunk-123",
-        "chunk-123",
-        "0"
+        "chunk-789"
       ],
       "relevant_ids": [
         "chunk-111"
       ],
       "recall_at_1": 1.0,
+      "recall_at_3": 1.0,
+      "recall_at_5": 1.0,
+      "recall_at_10": 1.0,
+      "reciprocal_rank": 1.0
+    },
+    {
+      "query": "What is the CEO's favorite food?",
+      "retrieved_ids": [
+        "chunk-111",
+        "chunk-456",
+        "chunk-789",
+        "chunk-123"
+      ],
+      "relevant_ids": [],
+      "recall_at_1": 0.0,
+      "recall_at_3": 0.0,
+      "recall_at_5": 0.0,
+      "recall_at_10": 0.0,
+      "reciprocal_rank": 0.0
+    },
+    {
+      "query": "What programming language does the CEO's private project use?",
+      "retrieved_ids": [
+        "chunk-111",
+        "chunk-456",
+        "chunk-789",
+        "chunk-123"
+      ],
+      "relevant_ids": [],
+      "recall_at_1": 0.0,
+      "recall_at_3": 0.0,
+      "recall_at_5": 0.0,
+      "recall_at_10": 0.0,
+      "reciprocal_rank": 0.0
+    },
+    {
+      "query": "How does audio enhancement work and who invented the technology?",
+      "retrieved_ids": [
+        "chunk-456",
+        "chunk-123",
+        "chunk-111",
+        "chunk-789"
+      ],
+      "relevant_ids": [
+        "chunk-123",
+        "chunk-456"
+      ],
+      "recall_at_1": 0.5,
       "recall_at_3": 1.0,
       "recall_at_5": 1.0,
       "recall_at_10": 1.0,
