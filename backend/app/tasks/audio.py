@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 import tempfile
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -11,12 +12,17 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.core.config import settings
 from app.core.logger import logger
 from app.db.model.audio_job import AudioJob, AudioJobStatus
 from app.db.session import AsyncSessionLocal
 from app.storage.minio import minio_storage
 from app.workers.celery_app import celery
+
+from app.core.metrics import (
+    CELERY_TASK_DURATION_SECONDS,
+    CELERY_TASK_RETRIES_TOTAL,
+    CELERY_TASKS_TOTAL,
+)
 
 
 # ============================================================
@@ -146,18 +152,12 @@ async def _load_job(
                 f"AudioJob {job_id} not found"
             )
 
-        if (
-            job.status
-            == AudioJobStatus.COMPLETED
-        ):
+        if job.status == AudioJobStatus.COMPLETED:
             raise AudioJobAlreadyCompleted(
                 f"AudioJob {job_id} is already completed"
             )
 
-        if (
-            job.status
-            == AudioJobStatus.CANCELLED
-        ):
+        if job.status == AudioJobStatus.CANCELLED:
             raise AudioJobCancelled(
                 f"AudioJob {job_id} is cancelled"
             )
@@ -195,8 +195,6 @@ async def _claim_job(
     Returns:
         True  -> this worker owns the job
         False -> another worker already owns it / job finished
-
-    This protects against duplicate Celery deliveries.
     """
 
     audio_job_id = uuid.UUID(job_id)
@@ -206,10 +204,8 @@ async def _claim_job(
         result = await db.execute(
             select(AudioJob).where(
                 AudioJob.id == audio_job_id,
-                AudioJob.status
-                != AudioJobStatus.COMPLETED,
-                AudioJob.status
-                != AudioJobStatus.CANCELLED,
+                AudioJob.status != AudioJobStatus.COMPLETED,
+                AudioJob.status != AudioJobStatus.CANCELLED,
             )
         )
 
@@ -218,14 +214,7 @@ async def _claim_job(
         if job is None:
             return False
 
-        # ----------------------------------------------------
-        # Already processing
-        # ----------------------------------------------------
-
-        if (
-            job.status
-            == AudioJobStatus.PROCESSING
-        ):
+        if job.status == AudioJobStatus.PROCESSING:
             logger.warning(
                 "AudioJob is already PROCESSING. "
                 "job_id=%s",
@@ -233,10 +222,6 @@ async def _claim_job(
             )
 
             return False
-
-        # ----------------------------------------------------
-        # Claim
-        # ----------------------------------------------------
 
         job.status = AudioJobStatus.PROCESSING
         job.started_at = utcnow()
@@ -345,23 +330,43 @@ def enhance_audio(
     """
 
     task_id = self.request.id
+    retry_count = self.request.retries
+
+    start_time = time.perf_counter()
+
+    CELERY_TASKS_TOTAL.labels(
+        task="enhance_audio",
+        status="started",
+    ).inc()
+
+    if retry_count > 0:
+        CELERY_TASK_RETRIES_TOTAL.labels(
+            task="enhance_audio",
+        ).inc()
 
     logger.info(
         "Audio enhancement task received. "
         "job_id=%s task_id=%s retry=%s",
         job_id,
         task_id,
-        self.request.retries,
+        retry_count,
     )
 
     try:
 
-        return asyncio.run(
+        result = asyncio.run(
             _process_audio_job(
                 job_id=job_id,
                 task_id=task_id,
             )
         )
+
+        CELERY_TASKS_TOTAL.labels(
+            task="enhance_audio",
+            status=result.get("status", "success"),
+        ).inc()
+
+        return result
 
     # ========================================================
     # PERMANENT CONDITIONS
@@ -373,6 +378,11 @@ def enhance_audio(
         AudioJobCancelled,
         PermanentAudioError,
     ) as exc:
+
+        CELERY_TASKS_TOTAL.labels(
+            task="enhance_audio",
+            status="failed",
+        ).inc()
 
         logger.warning(
             "Audio job will not be retried. "
@@ -399,14 +409,16 @@ def enhance_audio(
             "job_id=%s task_id=%s retry=%s error=%s",
             job_id,
             task_id,
-            self.request.retries,
+            retry_count,
             exc,
         )
 
-        if (
-            self.request.retries
-            >= MAX_RETRIES
-        ):
+        if retry_count >= MAX_RETRIES:
+
+            CELERY_TASKS_TOTAL.labels(
+                task="enhance_audio",
+                status="failed",
+            ).inc()
 
             logger.error(
                 "Maximum retries reached. "
@@ -425,7 +437,7 @@ def enhance_audio(
 
         countdown = min(
             RETRY_BACKOFF_SECONDS
-            * (2 ** self.request.retries),
+            * (2 ** retry_count),
             MAX_RETRY_BACKOFF_SECONDS,
         )
 
@@ -447,10 +459,12 @@ def enhance_audio(
             task_id,
         )
 
-        if (
-            self.request.retries
-            >= MAX_RETRIES
-        ):
+        if retry_count >= MAX_RETRIES:
+
+            CELERY_TASKS_TOTAL.labels(
+                task="enhance_audio",
+                status="failed",
+            ).inc()
 
             try:
                 asyncio.run(
@@ -474,7 +488,7 @@ def enhance_audio(
 
         countdown = min(
             RETRY_BACKOFF_SECONDS
-            * (2 ** self.request.retries),
+            * (2 ** retry_count),
             MAX_RETRY_BACKOFF_SECONDS,
         )
 
@@ -482,6 +496,14 @@ def enhance_audio(
             exc=exc,
             countdown=countdown,
         )
+
+    finally:
+
+        duration = time.perf_counter() - start_time
+
+        CELERY_TASK_DURATION_SECONDS.labels(
+            task="enhance_audio",
+        ).observe(duration)
 
 
 # ============================================================
@@ -510,10 +532,6 @@ async def _process_audio_job(
         9. Cleanup temporary files
     """
 
-    # ========================================================
-    # 1. LOAD JOB
-    # ========================================================
-
     job = await _load_job(job_id)
 
     logger.info(
@@ -523,10 +541,6 @@ async def _process_audio_job(
         job.input_object_key,
         job.output_object_key,
     )
-
-    # ========================================================
-    # 2. CLAIM JOB
-    # ========================================================
 
     claimed = await _claim_job(job_id)
 
@@ -551,28 +565,20 @@ async def _process_audio_job(
         task_id,
     )
 
-    # ========================================================
-    # 3. TEMPORARY WORKSPACE
-    # ========================================================
-
     temp_dir = Path(
         tempfile.mkdtemp(
             prefix=f"audio-{job_id}-"
         )
     )
 
-    input_path = (
-        temp_dir / "input_audio"
-    )
+    input_path = temp_dir / "input_audio"
 
-    output_path = (
-        temp_dir / "enhanced_audio.wav"
-    )
+    output_path = temp_dir / "enhanced_audio.wav"
 
     try:
 
         # ====================================================
-        # 4. DOWNLOAD INPUT
+        # DOWNLOAD INPUT
         # ====================================================
 
         logger.info(
@@ -585,12 +591,8 @@ async def _process_audio_job(
         try:
 
             await minio_storage.download_file(
-                object_name=(
-                    job.input_object_key
-                ),
-                destination=str(
-                    input_path
-                ),
+                object_name=job.input_object_key,
+                destination=str(input_path),
             )
 
         except Exception as exc:
@@ -626,7 +628,7 @@ async def _process_audio_job(
         )
 
         # ====================================================
-        # 5. RUN DEEPFILTERNET
+        # RUN DEEPFILTERNET
         # ====================================================
 
         logger.info(
@@ -636,13 +638,6 @@ async def _process_audio_job(
         )
 
         try:
-
-            # ------------------------------------------------
-            # IMPORTANT:
-            #
-            # Replace this with your actual DeepFilterNet
-            # implementation.
-            # ------------------------------------------------
 
             from app.audio.enhancer import (
                 enhance_audio_file,
@@ -676,7 +671,7 @@ async def _process_audio_job(
         )
 
         # ====================================================
-        # 6. VALIDATE OUTPUT
+        # VALIDATE OUTPUT
         # ====================================================
 
         if not output_path.exists():
@@ -686,9 +681,7 @@ async def _process_audio_job(
                 "output file was not created"
             )
 
-        output_size = (
-            output_path.stat().st_size
-        )
+        output_size = output_path.stat().st_size
 
         if output_size <= 0:
 
@@ -704,7 +697,7 @@ async def _process_audio_job(
         )
 
         # ====================================================
-        # 7. UPLOAD OUTPUT
+        # UPLOAD OUTPUT
         # ====================================================
 
         logger.info(
@@ -717,15 +710,9 @@ async def _process_audio_job(
         try:
 
             await minio_storage.upload_file(
-                file_path=str(
-                    output_path
-                ),
-                object_name=(
-                    job.output_object_key
-                ),
-                content_type=(
-                    DEFAULT_OUTPUT_CONTENT_TYPE
-                ),
+                file_path=str(output_path),
+                object_name=job.output_object_key,
+                content_type=DEFAULT_OUTPUT_CONTENT_TYPE,
             )
 
         except Exception as exc:
@@ -748,14 +735,12 @@ async def _process_audio_job(
         )
 
         # ====================================================
-        # 8. MARK COMPLETED
+        # MARK COMPLETED
         # ====================================================
 
         await _mark_completed(
             job_id=job_id,
-            output_object_key=(
-                job.output_object_key
-            ),
+            output_object_key=job.output_object_key,
         )
 
         logger.info(
@@ -768,12 +753,8 @@ async def _process_audio_job(
         return {
             "job_id": job_id,
             "status": "completed",
-            "input_object_key": (
-                job.input_object_key
-            ),
-            "output_object_key": (
-                job.output_object_key
-            ),
+            "input_object_key": job.input_object_key,
+            "output_object_key": job.output_object_key,
         }
 
     except PermanentAudioError as exc:
@@ -793,10 +774,6 @@ async def _process_audio_job(
         raise
 
     finally:
-
-        # ====================================================
-        # 9. ALWAYS CLEANUP
-        # ====================================================
 
         try:
 

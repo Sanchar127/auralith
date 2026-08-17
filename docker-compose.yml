@@ -459,6 +459,29 @@ services:
     networks:
       - backend-network
 
+  prometheus:
+    image: prom/prometheus:v3.5.0
+
+    container_name: auralith-prometheus
+
+    restart: unless-stopped
+
+    ports:
+      - "9090:9090"
+
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+
+    networks:
+      - backend-network
+
 volumes:
   postgres-data:
     name: auralith_postgres_data
@@ -472,25 +495,13 @@ volumes:
   minio-data:
     name: auralith_minio_data
   
-  # yue-models:
-  #   name: auralith_yue_models
-
-  # yue-cache:
-  #   name: auralith_yue_cache
+  
   qdrant-data:
     name: auralith_qdrant_data
+  
+  prometheus-data:
+    name: auralith_prometheus_data
 
-  matchering-input:
-    name: auralith_matchering_input
-
-  matchering-reference:
-    name: auralith_matchering_reference
-
-  matchering-output:
-    name: auralith_matchering_output
-
-  matchering-temp:
-    name: auralith_matchering_temp
 
 networks:
   backend-network:

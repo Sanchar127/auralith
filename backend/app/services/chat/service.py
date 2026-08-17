@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import uuid
 from uuid import UUID
 
@@ -10,6 +11,13 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.logger import logger
+from app.core.metrics import (
+    AUDIO_JOB_ERRORS_TOTAL,
+    AUDIO_JOBS_TOTAL,
+    CHAT_DURATION_SECONDS,
+    CHAT_ERRORS_TOTAL,
+    CHAT_REQUESTS_TOTAL,
+)
 from app.db.model.conversation import Conversation
 from app.db.session import AsyncSessionLocal
 from app.grpc.subscription_client import SubscriptionClient
@@ -34,7 +42,19 @@ class ChatService:
     - Queue DeepFilterNet Celery tasks.
     - Execute RAG / LLM requests.
     - Reserve and settle subscription tokens.
+
+    Observability:
+    - Chat request metrics.
+    - Chat latency metrics.
+    - Chat error metrics.
+    - LLM request metrics.
+    - LLM latency metrics.
+    - LLM error metrics.
+    - LLM token usage metrics.
+    - Audio job metrics.
     """
+
+    SERVICE_NAME = "backend"
 
     def __init__(
         self,
@@ -144,110 +164,123 @@ class ChatService:
     ) -> ChatResponse:
         """
         Main chat entry point.
-
-        Audio flow:
-
-            Upload
-               ↓
-            MinIO
-               ↓
-            AudioJob PostgreSQL
-               ↓
-            Build DeepFilterNet payload
-               ↓
-            Celery / RabbitMQ
-               ↓
-            DeepFilterNet
-               ↓
-            MinIO
-
-        Normal chat flow:
-
-            Message
-               ↓
-            Reserve tokens
-               ↓
-            RAG / LLM
-               ↓
-            Calculate usage
-               ↓
-            Settle tokens
-               ↓
-            Response
         """
+
+        chat_start = time.perf_counter()
+
+        CHAT_REQUESTS_TOTAL.labels(
+            service=self.SERVICE_NAME,
+        ).inc()
 
         # =====================================================
         # 0. VALIDATE REQUEST
         # =====================================================
 
-        if not user_id:
+        try:
 
-            raise HTTPException(
-                status_code=400,
-                detail="user_id is required",
+            if not user_id:
+
+                CHAT_ERRORS_TOTAL.labels(
+                    service=self.SERVICE_NAME,
+                    error_type="missing_user_id",
+                ).inc()
+
+                raise HTTPException(
+                    status_code=400,
+                    detail="user_id is required",
+                )
+
+            message = message or ""
+
+            if not message.strip() and file is None:
+
+                CHAT_ERRORS_TOTAL.labels(
+                    service=self.SERVICE_NAME,
+                    error_type="empty_request",
+                ).inc()
+
+                raise HTTPException(
+                    status_code=400,
+                    detail="Message or file is required",
+                )
+
+            request_id = str(uuid.uuid4())
+
+            logger.info(
+                "Chat request started "
+                "user_id=%s conversation_id=%s request_id=%s",
+                user_id,
+                conversation_id,
+                request_id,
             )
 
-        message = message or ""
+            # =================================================
+            # 1. GET OR CREATE CONVERSATION
+            # =================================================
 
-        if not message.strip() and file is None:
-
-            raise HTTPException(
-                status_code=400,
-                detail="Message or file is required",
+            conversation_id = (
+                await self._get_or_create_conversation(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                )
             )
 
-        request_id = str(uuid.uuid4())
+            logger.info(
+                "Using conversation "
+                "user_id=%s conversation_id=%s request_id=%s",
+                user_id,
+                conversation_id,
+                request_id,
+            )
 
-        logger.info(
-            "Chat request started "
-            "user_id=%s conversation_id=%s request_id=%s",
-            user_id,
-            conversation_id,
-            request_id,
-        )
+            # =================================================
+            # 2. AUDIO PIPELINE
+            # =================================================
 
-        # =====================================================
-        # 1. GET OR CREATE CONVERSATION
-        # =====================================================
+            if file is not None:
 
-        conversation_id = (
-            await self._get_or_create_conversation(
+                return await self._handle_audio(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    file=file,
+                    request_id=request_id,
+                )
+
+            # =================================================
+            # 3. NORMAL LLM CHAT
+            # =================================================
+
+            return await self._handle_chat(
                 user_id=user_id,
                 conversation_id=conversation_id,
-            )
-        )
-
-        logger.info(
-            "Using conversation "
-            "user_id=%s conversation_id=%s request_id=%s",
-            user_id,
-            conversation_id,
-            request_id,
-        )
-
-        # =====================================================
-        # 2. AUDIO PIPELINE
-        # =====================================================
-
-        if file is not None:
-
-            return await self._handle_audio(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                file=file,
+                message=message,
                 request_id=request_id,
             )
 
-        # =====================================================
-        # 3. NORMAL LLM CHAT
-        # =====================================================
+        except HTTPException:
 
-        return await self._handle_chat(
-            user_id=user_id,
-            conversation_id=conversation_id,
-            message=message,
-            request_id=request_id,
-        )
+            raise
+
+        except Exception:
+
+            CHAT_ERRORS_TOTAL.labels(
+                service=self.SERVICE_NAME,
+                error_type="unexpected_error",
+            ).inc()
+
+            logger.exception(
+                "Unexpected error while processing chat request"
+            )
+
+            raise
+
+        finally:
+
+            CHAT_DURATION_SECONDS.labels(
+                service=self.SERVICE_NAME,
+            ).observe(
+                time.perf_counter() - chat_start
+            )
 
     # =========================================================
     # AUDIO
@@ -263,17 +296,38 @@ class ChatService:
     ) -> ChatResponse:
         """
         Handle audio upload and queue DeepFilterNet.
-
-        The complete job payload is sent to Celery so the
-        DeepFilterNet service does not need access to the
-        Auralith PostgreSQL database.
         """
+
+        # =====================================================
+        # AUDIO JOB STARTED
+        # =====================================================
+
+        AUDIO_JOBS_TOTAL.labels(
+            service=self.SERVICE_NAME,
+            status="started",
+        ).inc()
 
         # =====================================================
         # VALIDATE AUDIO
         # =====================================================
 
-        await validate_audio_file(file)
+        try:
+
+            await validate_audio_file(file)
+
+        except Exception:
+
+            AUDIO_JOB_ERRORS_TOTAL.labels(
+                service=self.SERVICE_NAME,
+                error_type="validation",
+            ).inc()
+
+            AUDIO_JOBS_TOTAL.labels(
+                service=self.SERVICE_NAME,
+                status="failed",
+            ).inc()
+
+            raise
 
         logger.info(
             "Audio validation successful "
@@ -300,6 +354,16 @@ class ChatService:
             )
 
         except Exception as exc:
+
+            AUDIO_JOB_ERRORS_TOTAL.labels(
+                service=self.SERVICE_NAME,
+                error_type="minio_upload",
+            ).inc()
+
+            AUDIO_JOBS_TOTAL.labels(
+                service=self.SERVICE_NAME,
+                status="failed",
+            ).inc()
 
             logger.exception(
                 "Failed to upload audio "
@@ -348,6 +412,16 @@ class ChatService:
                 await db.commit()
 
             except Exception as exc:
+
+                AUDIO_JOB_ERRORS_TOTAL.labels(
+                    service=self.SERVICE_NAME,
+                    error_type="database",
+                ).inc()
+
+                AUDIO_JOBS_TOTAL.labels(
+                    service=self.SERVICE_NAME,
+                    status="failed",
+                ).inc()
 
                 await db.rollback()
 
@@ -420,6 +494,16 @@ class ChatService:
 
             except Exception as exc:
 
+                AUDIO_JOB_ERRORS_TOTAL.labels(
+                    service=self.SERVICE_NAME,
+                    error_type="celery",
+                ).inc()
+
+                AUDIO_JOBS_TOTAL.labels(
+                    service=self.SERVICE_NAME,
+                    status="failed",
+                ).inc()
+
                 logger.exception(
                     "Failed to queue audio enhancement "
                     "job_id=%s",
@@ -460,6 +544,11 @@ class ChatService:
             job.celery_task_id = task.id
 
             await db.commit()
+
+            AUDIO_JOBS_TOTAL.labels(
+                service=self.SERVICE_NAME,
+                status="queued",
+            ).inc()
 
             logger.info(
                 "Audio enhancement task queued "
@@ -542,6 +631,11 @@ class ChatService:
 
         except grpc.aio.AioRpcError as exc:
 
+            CHAT_ERRORS_TOTAL.labels(
+                service=self.SERVICE_NAME,
+                error_type="subscription_reservation",
+            ).inc()
+
             logger.error(
                 "Subscription reservation failed "
                 "user_id=%s request_id=%s code=%s",
@@ -567,6 +661,11 @@ class ChatService:
 
         except Exception as exc:
 
+            CHAT_ERRORS_TOTAL.labels(
+                service=self.SERVICE_NAME,
+                error_type="subscription_reservation",
+            ).inc()
+
             logger.exception(
                 "Unexpected token reservation error "
                 "user_id=%s request_id=%s",
@@ -584,6 +683,11 @@ class ChatService:
         # =====================================================
 
         if not reservation.success:
+
+            CHAT_ERRORS_TOTAL.labels(
+                service=self.SERVICE_NAME,
+                error_type="insufficient_tokens",
+            ).inc()
 
             logger.info(
                 "Token reservation rejected "
@@ -617,6 +721,9 @@ class ChatService:
         # RUN RAG / LLM
         # =====================================================
 
+     
+   
+
         try:
 
             response = await rag_pipeline.run(
@@ -625,6 +732,13 @@ class ChatService:
             )
 
         except Exception as exc:
+
+            
+
+            CHAT_ERRORS_TOTAL.labels(
+                service=self.SERVICE_NAME,
+                error_type="llm_generation",
+            ).inc()
 
             logger.exception(
                 "AI generation failed "
@@ -641,6 +755,8 @@ class ChatService:
                 detail="AI generation failed",
             ) from exc
 
+            
+
         # =====================================================
         # CALCULATE TOKEN USAGE
         # =====================================================
@@ -653,6 +769,10 @@ class ChatService:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
+
+        # =====================================================
+        # TOKEN METRICS
+        # =====================================================
 
         logger.info(
             "Token usage calculated "
@@ -686,6 +806,11 @@ class ChatService:
 
         except grpc.aio.AioRpcError as exc:
 
+            CHAT_ERRORS_TOTAL.labels(
+                service=self.SERVICE_NAME,
+                error_type="token_settlement",
+            ).inc()
+
             logger.critical(
                 "CRITICAL: token settlement failed "
                 "after successful AI generation "
@@ -706,6 +831,11 @@ class ChatService:
             ) from exc
 
         except Exception as exc:
+
+            CHAT_ERRORS_TOTAL.labels(
+                service=self.SERVICE_NAME,
+                error_type="token_settlement",
+            ).inc()
 
             logger.critical(
                 "CRITICAL: unexpected token settlement error "
@@ -730,6 +860,11 @@ class ChatService:
         # =====================================================
 
         if not settlement.success:
+
+            CHAT_ERRORS_TOTAL.labels(
+                service=self.SERVICE_NAME,
+                error_type="token_settlement_rejected",
+            ).inc()
 
             logger.critical(
                 "Token settlement rejected "

@@ -1,8 +1,6 @@
 import time
 
-from starlette.middleware.base import (
-    BaseHTTPMiddleware,
-)
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from app.core.logger import logger
@@ -17,88 +15,60 @@ class RequestLoggingMiddleware(
         request: Request,
         call_next,
     ):
-
         start = time.perf_counter()
 
-        request_id = getattr(
-            request.state,
-            "request_id",
-            "-",
-        )
-
         logger.info(
-
-            "Incoming request | "
-
-            "request_id=%s "
-
-            "method=%s "
-
-            "path=%s "
-
-            "client=%s",
-
-            request_id,
-
-            request.method,
-
-            request.url.path,
-
-            request.client.host
-            if request.client
-            else "-",
-
+            "request_started",
+            method=request.method,
+            path=request.url.path,
+            client=(
+                request.client.host
+                if request.client
+                else None
+            ),
         )
 
         try:
-
             response = await call_next(
                 request
             )
 
         except Exception:
+            duration_ms = (
+                time.perf_counter()
+                - start
+            ) * 1000
 
             logger.exception(
-
-                "Unhandled exception | "
-
-                "request_id=%s "
-
-                "method=%s "
-
-                "path=%s",
-
-                request_id,
-
-                request.method,
-
-                request.url.path,
-
+                "request_failed",
+                method=request.method,
+                path=request.url.path,
+                duration_ms=round(
+                    duration_ms,
+                    2,
+                ),
             )
 
             raise
 
-        duration = (
+        duration_ms = (
             time.perf_counter()
             - start
         ) * 1000
 
         logger.info(
-
-            "Request completed | "
-
-            "request_id=%s "
-
-            "status=%s "
-
-            "duration=%.2fms",
-
-            request_id,
-
-            response.status_code,
-
-            duration,
-
+            "request_completed",
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration_ms=round(
+                duration_ms,
+                2,
+            ),
         )
+
+        response.headers[
+            "X-Request-ID"
+        ] = request.state.request_id
 
         return response

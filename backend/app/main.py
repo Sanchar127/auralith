@@ -22,8 +22,8 @@ from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.services.chat.memory import conversation_memory
 from app.services.rag.pipeline import rag_pipeline
 from app.services.rag.vector_store import vector_store
-
-
+from app.api.v1.metrics import router as metrics_router
+from app.core.metrics import instrumentator
 grpc_task: asyncio.Task | None = None
 
 
@@ -201,18 +201,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+instrumentator.instrument(app).expose(
+    app,
+    endpoint="/metrics",
+    include_in_schema=False,
+)
+
 
 # ==========================================
 # Middleware
 # ==========================================
+app.add_middleware(
+    RequestLoggingMiddleware
+)
 
 app.add_middleware(
     RequestIDMiddleware
 )
 
-app.add_middleware(
-    RequestLoggingMiddleware
-)
 
 app.add_middleware(
     SecurityHeadersMiddleware
@@ -241,7 +247,9 @@ app.include_router(
     prefix="/api/v1",
 )
 
-
+app.include_router(
+    metrics_router,
+)
 # ==========================================
 # Health Check
 # ==========================================
