@@ -25,29 +25,85 @@ jobs:
     timeout-minutes: 60
 
     env:
+      # ======================================================
+      # Application
+      # ======================================================
+
       APP_ENV: test
       LOG_LEVEL: WARNING
 
-      POSTGRES_USER: ${{ vars.POSTGRES_USER }}
-      POSTGRES_DB: ${{ vars.POSTGRES_DB }}
-      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
 
+      # ======================================================
+      # PostgreSQL
+      # ======================================================
+
+      POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+
+      POSTGRES_CONTAINER_NAME: auralith-postgres
+      POSTGRES_PORT: 5432
+
+      # ======================================================
+      # Redis
+      # ======================================================
+
+      REDIS_CONTAINER_NAME: auralith-redis
       REDIS_PORT: 6379
+
+      # ======================================================
+      # RabbitMQ
+      # ======================================================
+
+      RABBITMQ_CONTAINER_NAME: auralith-rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_MANAGEMENT_PORT: 15672
 
       RABBITMQ_DEFAULT_USER: ${{ vars.RABBITMQ_DEFAULT_USER }}
       RABBITMQ_DEFAULT_PASS: ${{ secrets.RABBITMQ_DEFAULT_PASS }}
 
+      # ======================================================
+      # MinIO
+      # ======================================================
+
+      MINIO_CONTAINER_NAME: auralith-minio
+      MINIO_API_PORT: 9000
+      MINIO_CONSOLE_PORT: 9001
+      MINIO_BUCKET: auralith
+
       MINIO_ROOT_USER: ${{ vars.MINIO_ROOT_USER }}
       MINIO_ROOT_PASSWORD: ${{ secrets.MINIO_ROOT_PASSWORD }}
-      MINIO_API_PORT: 9000
 
+      # ======================================================
+      # Qdrant
+      # ======================================================
+
+      QDRANT_CONTAINER_NAME: auralith-qdrant
       QDRANT_PORT: 6333
+
+      # ======================================================
+      # Ollama
+      # ======================================================
+
+      OLLAMA_CONTAINER_NAME: auralith-ollama
       OLLAMA_PORT: 11434
+
+      # ======================================================
+      # API
+      # ======================================================
+
+      API_CONTAINER_NAME: auralith-api
       API_PORT: 8000
 
-      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      # ======================================================
+      # Celery
+      # ======================================================
+
+      CELERY_CONTAINER_NAME: auralith-celery
 
     steps:
+
       # ======================================================
       # 1. Checkout
       # ======================================================
@@ -81,31 +137,69 @@ jobs:
 
       - name: Create CI environment
         run: |
+          set -e
+
+          echo "[CI] Creating root .env..."
+
           cat > .env <<EOF
           APP_ENV=${APP_ENV}
           LOG_LEVEL=${LOG_LEVEL}
 
+          SECRET_KEY=${SECRET_KEY}
+
           POSTGRES_USER=${POSTGRES_USER}
           POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
           POSTGRES_DB=${POSTGRES_DB}
+          POSTGRES_CONTAINER_NAME=${POSTGRES_CONTAINER_NAME}
+          POSTGRES_PORT=${POSTGRES_PORT}
 
+          REDIS_CONTAINER_NAME=${REDIS_CONTAINER_NAME}
           REDIS_PORT=${REDIS_PORT}
 
+          RABBITMQ_CONTAINER_NAME=${RABBITMQ_CONTAINER_NAME}
+          RABBITMQ_PORT=${RABBITMQ_PORT}
+          RABBITMQ_MANAGEMENT_PORT=${RABBITMQ_MANAGEMENT_PORT}
           RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER}
           RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS}
 
+          MINIO_CONTAINER_NAME=${MINIO_CONTAINER_NAME}
+          MINIO_API_PORT=${MINIO_API_PORT}
+          MINIO_CONSOLE_PORT=${MINIO_CONSOLE_PORT}
+          MINIO_BUCKET=${MINIO_BUCKET}
           MINIO_ROOT_USER=${MINIO_ROOT_USER}
           MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-          MINIO_API_PORT=${MINIO_API_PORT}
 
+          QDRANT_CONTAINER_NAME=${QDRANT_CONTAINER_NAME}
           QDRANT_PORT=${QDRANT_PORT}
+
+          OLLAMA_CONTAINER_NAME=${OLLAMA_CONTAINER_NAME}
           OLLAMA_PORT=${OLLAMA_PORT}
+
+          API_CONTAINER_NAME=${API_CONTAINER_NAME}
           API_PORT=${API_PORT}
 
+          CELERY_CONTAINER_NAME=${CELERY_CONTAINER_NAME}
+          EOF
+
+          echo "[CI] Creating subscription/.env..."
+
+          mkdir -p subscription
+
+          cat > subscription/.env <<EOF
+          APP_ENV=${APP_ENV}
+          LOG_LEVEL=${LOG_LEVEL}
+
           SECRET_KEY=${SECRET_KEY}
+
+          POSTGRES_USER=${POSTGRES_USER}
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_DB=${POSTGRES_DB}
           EOF
 
           chmod 600 .env
+          chmod 600 subscription/.env
+
+          echo "[CI] Environment files created."
 
       # ======================================================
       # 5. Verify Docker
@@ -133,3 +227,4 @@ jobs:
         if: always()
         run: |
           rm -f .env
+          rm -f subscription/.env
