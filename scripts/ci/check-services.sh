@@ -52,17 +52,10 @@ wait_for_http \
 # Subscription
 # ------------------------------------------------------------
 
-wait_for_http \
-    "Subscription service" \
-    "http://localhost:8002/health"
+# wait_for_http \
+#     "Subscription service" \
+#     "http://localhost:8002/health"
 
-# ------------------------------------------------------------
-# Matchering
-# ------------------------------------------------------------
-
-wait_for_http \
-    "Matchering service" \
-    "http://localhost:8003/health"
 
 # ------------------------------------------------------------
 # DeepFilterNet
