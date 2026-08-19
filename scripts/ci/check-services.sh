@@ -63,30 +63,42 @@ wait_for_http() {
 # ------------------------------------------------------------
 
 check_api_inside_container() {
-    log "Checking Auralith API from inside the container..."
+    local retries="${1:-120}"
 
-    if docker compose exec -T api \
-        python -c "
+    log "Waiting for Auralith API inside the container..."
+
+    for ((i = 1; i <= retries; i++)); do
+
+        if docker compose exec -T api \
+            python -c "
 import urllib.request
 
 url = 'http://127.0.0.1:8000/health'
 
-with urllib.request.urlopen(url, timeout=10) as response:
+with urllib.request.urlopen(url, timeout=5) as response:
     body = response.read().decode()
     print(body)
 
     if response.status != 200:
         raise SystemExit(1)
-"; then
+" >/dev/null 2>&1; then
 
-        pass "Auralith API is healthy inside the container."
-        return 0
-    fi
+            pass "Auralith API is healthy inside the container."
+            return 0
+        fi
+
+        if (( i % 10 == 0 )); then
+            log "Auralith API not ready inside container (${i}/${retries})..."
+        fi
+
+        sleep 2
+    done
 
     printf '\033[1;31m[FAIL]\033[0m Auralith API failed inside the container.\n'
 
+    echo
     log "Auralith API logs:"
-    docker compose logs --no-color --tail=200 api || true
+    docker compose logs --no-color --tail=300 api || true
 
     return 1
 }
