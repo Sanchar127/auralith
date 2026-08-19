@@ -1,4 +1,4 @@
-```bash
+
 #!/usr/bin/env bash
 
 set -Eeuo pipefail
@@ -184,4 +184,4 @@ docker compose ps
 
 echo
 pass "All application service checks passed."
-```
+
